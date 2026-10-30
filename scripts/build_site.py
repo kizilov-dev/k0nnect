@@ -2,6 +2,7 @@
 """Build the dependency-free static documentation site for GitHub Pages."""
 import argparse
 import html
+import hashlib
 import os
 import re
 import shutil
@@ -153,6 +154,14 @@ def page_url(name):
     return '../' if name == 'index' else '../' + name + '/'
 
 
+def version_assets(page):
+    # A deploy must not mix cached scripts/styles with new translated HTML.
+    for name in ('style.css', 'app.js', 'logo.svg'):
+        digest = hashlib.sha256((ROOT / 'website/assets' / name).read_bytes()).hexdigest()[:12]
+        page = page.replace('assets/' + name + '"', 'assets/' + name + '?v=' + digest + '"')
+    return page
+
+
 def build(destination, repo):
     destination = destination.resolve()
     if destination in (ROOT, ROOT / 'website') or ROOT not in destination.parents:
@@ -180,7 +189,7 @@ def build_language(destination, repo, language):
     landing = (ROOT / 'website' / source_name).read_text().replace('{{repo}}', html.escape(repo, quote=True))
     landing = landing.replace('{{assets}}', '../' if language == 'ru' else '')
     landing = landing.replace('{{language_switch}}', language_switch(destination, language_root, Path('.'), language))
-    (language_root / 'index.html').write_text(landing)
+    (language_root / 'index.html').write_text(version_assets(landing))
     for index, (name, title, _) in enumerate(pages):
         prefix = '../' if name == 'index' else '../../'
         target = language_root / 'docs' / ('' if name == 'index' else name)
@@ -213,7 +222,7 @@ def build_language(destination, repo, language):
         page = f'''<!doctype html><html lang="{language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} — k0nnect</title><meta name="description" content="{title}: {ui["description"]}"><meta name="theme-color" content="#126b56"><link rel="icon" href="{assets}assets/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="{assets}assets/style.css"><script defer src="{assets}assets/app.js"></script></head><body>
 <a class="skip" href="#main">{ui["skip"]}</a><header class="header"><div class="wrap"><a class="brand" href="{prefix}" aria-label="{ui["home"]}"><img src="{assets}assets/logo.svg" width="34" height="34" alt="">k0nnect</a>{switch}<button class="menu-toggle" aria-label="{ui["open_menu"]}" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-label">{ui["menu"]}</span> <span aria-hidden="true">☰</span></button><nav class="nav" id="site-nav" aria-label="{ui["navigation"]}"><a href="{prefix}docs/">{ui["documentation"]}</a><a href="{repo}">GitHub ↗</a><span class="pill">Experimental</span></nav></div></header>
 <div class="wrap docs-shell"><button class="docs-menu" aria-expanded="false" aria-controls="docs-sidebar">{ui["browse"]} ↓</button><aside class="sidebar" id="docs-sidebar" aria-label="{ui["browse"]}"><label class="sr-only" for="doc-search">{ui["find"]}</label><input class="doc-search" id="doc-search" type="search" placeholder="{ui["find"]}…"><nav>{''.join(nav)}</nav><p class="search-empty" hidden>{ui["empty"]}</p></aside><main class="doc-article" id="main"><div class="eyebrow">k0nnect / documentation</div>{article}<nav class="doc-end" aria-label="{ui["adjacent"]}">{pagination}</nav></main><aside class="toc" aria-label="{ui["toc"]}"><strong>{ui["toc"]}</strong>{contents}</aside></div><footer class="footer"><div class="wrap"><span>k0nnect · Experimental · k0s</span><div><a href="{repo}">{ui["source"]} ↗</a><a href="{repo}/blob/main/website/content/{edit_path}">{ui["edit"]} ↗</a></div></div></footer></body></html>'''
-        (target / 'index.html').write_text(page)
+        (target / 'index.html').write_text(version_assets(page))
     (language_root / '404.html').write_text(f'<!doctype html><html lang="{language}"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{ui["missing"]} — k0nnect</title><body style="font:18px/1.7 system-ui;max-width:600px;margin:12vh auto;padding:24px"><h1>{ui["missing"]}</h1><p>{ui["moved"]}</p><a href="{repo}">{ui["open_repo"]} →</a></body></html>')
 
 
