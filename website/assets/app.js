@@ -1,3 +1,10 @@
+const language = document.documentElement.lang === 'ru' ? 'ru' : 'en';
+const labels = language === 'ru'
+  ? {copy: 'Копировать', copied: 'Скопировано', copyLabel: 'Копировать пример кода', status: 'Код скопирован', select: 'Выделить код'}
+  : {copy: 'Copy', copied: 'Copied', copyLabel: 'Copy code example', status: 'Code copied to clipboard', select: 'Select code'};
+document.querySelector('[data-language-switch]')?.addEventListener('change', event => {
+  window.location.assign(event.target.value);
+});
 const navToggle = document.querySelector('.menu-toggle');
 const siteNav = document.querySelector('.nav');
 function closeNav() {
@@ -24,10 +31,10 @@ menu?.addEventListener('click', () => {
 });
 const search = document.querySelector('.doc-search');
 search?.addEventListener('input', () => {
-  const query = search.value.trim().toLocaleLowerCase('en');
+  const query = search.value.trim().toLocaleLowerCase(language);
   let count = 0;
   for (const link of sidebar.querySelectorAll('a[data-search]')) {
-    const match = link.dataset.search.toLocaleLowerCase('en').includes(query);
+    const match = link.dataset.search.toLocaleLowerCase(language).includes(query);
     link.hidden = !match;
     if (match) count++;
   }
@@ -39,18 +46,18 @@ search?.addEventListener('input', () => {
 for (const pre of document.querySelectorAll('pre[data-copy]')) {
   const button = document.createElement('button');
   button.className = 'copy';
-  button.textContent = 'Copy';
-  button.setAttribute('aria-label', 'Copy code example');
+  button.textContent = labels.copy;
+  button.setAttribute('aria-label', labels.copyLabel);
   const status = document.createElement('span');
   status.className = 'sr-only';
   status.setAttribute('role', 'status');
   button.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(pre.querySelector('code').textContent);
-      button.textContent = 'Copied'; status.textContent = 'Code copied to clipboard';
-      setTimeout(() => { button.textContent = 'Copy'; status.textContent = ''; }, 1800);
+      button.textContent = labels.copied; status.textContent = labels.status;
+      setTimeout(() => { button.textContent = labels.copy; status.textContent = ''; }, 1800);
     } catch {
-      button.textContent = 'Select code';
+      button.textContent = labels.select;
       const selection = window.getSelection();
       const range = document.createRange();
       range.selectNodeContents(pre.querySelector('code'));

@@ -2,6 +2,7 @@
 """Build the dependency-free static documentation site for GitHub Pages."""
 import argparse
 import html
+import os
 import re
 import shutil
 import unicodedata
@@ -19,6 +20,32 @@ PAGES = [
     ('verification', 'Tests and results', 'Using k0nnect'),
     ('troubleshooting', 'Troubleshooting', 'Using k0nnect'),
 ]
+
+PAGES_RU = [
+ ('index', 'Обзор', 'Начать'),
+ ('getting-started', 'Быстрый старт', 'Начать'),
+ ('configuration', 'Конфигурация', 'Начать'),
+ ('compatibility', 'Совместимость', 'Устройство'),
+ ('architecture', 'Архитектура', 'Устройство'),
+ ('security', 'Права и секреты', 'Устройство'),
+ ('operations', 'Эксплуатация', 'Работа с утилитой'),
+ ('verification', 'Проверки и результаты', 'Работа с утилитой'),
+ ('troubleshooting', 'Диагностика', 'Работа с утилитой'),
+]
+UI = {
+ 'en': {'skip':'Skip to content','home':'k0nnect home','navigation':'Main navigation','menu':'Menu','open_menu':'Open navigation','documentation':'Documentation','browse':'Browse documentation','find':'Find a section','empty':'No matching sections','adjacent':'Previous and next pages','toc':'On this page','source':'Source code','edit':'Edit this page','missing':'Page not found','moved':'This documentation page may have moved.','open_repo':'Open the k0nnect repository','description':'k0nnect guide to enrolling external servers into Kubernetes.'},
+ 'ru': {'skip':'Перейти к содержимому','home':'k0nnect — главная','navigation':'Главное меню','menu':'Меню','open_menu':'Открыть меню','documentation':'Документация','browse':'Разделы документации','find':'Найти раздел','empty':'Раздел не найден','adjacent':'Соседние страницы','toc':'На этой странице','source':'Исходный код','edit':'Изменить страницу','missing':'Страница не найдена','moved':'Возможно, адрес документации изменился.','open_repo':'Открыть репозиторий k0nnect','description':'Руководство k0nnect для подключения внешней VDS к Kubernetes.'},
+}
+
+
+def language_switch(destination, target, relative_page, language):
+    options = []
+    for code, label in [('en', 'English'), ('ru', 'Русский')]:
+        other = destination / ('ru' if code == 'ru' else '') / relative_page
+        url = os.path.relpath(other, target).replace(os.sep, '/') + '/'
+        options.append('<option value="' + url + '"' + (' selected' if code == language else '') + ' lang="' + code + '">' + label + '</option>')
+    name = 'Language' if language == 'en' else 'Язык'
+    return '<select class="language-select" data-language-switch aria-label="' + name + '">' + ''.join(options) + '</select>'
 
 
 def slug(text):
@@ -139,15 +166,32 @@ def build(destination, repo):
     (destination / '.k0nnect-generated').touch()
     (destination / '.nojekyll').touch()
     shutil.copytree(ROOT / 'website/assets', destination / 'assets')
-    landing = (ROOT / 'website/index.html').read_text().replace('{{repo}}', html.escape(repo, quote=True))
-    (destination / 'index.html').write_text(landing)
-    for index, (name, title, _) in enumerate(PAGES):
+    for language in ['en', 'ru']:
+        build_language(destination, repo, language)
+    print(f'Built {2*(len(PAGES)+2)} pages in {destination}')
+
+
+def build_language(destination, repo, language):
+    ui = UI[language]
+    pages = PAGES_RU if language == 'ru' else PAGES
+    language_root = destination / ('ru' if language == 'ru' else '')
+    language_root.mkdir(parents=True, exist_ok=True)
+    source_name = 'index-ru.html' if language == 'ru' else 'index.html'
+    landing = (ROOT / 'website' / source_name).read_text().replace('{{repo}}', html.escape(repo, quote=True))
+    landing = landing.replace('{{assets}}', '../' if language == 'ru' else '')
+    landing = landing.replace('{{language_switch}}', language_switch(destination, language_root, Path('.'), language))
+    (language_root / 'index.html').write_text(landing)
+    for index, (name, title, _) in enumerate(pages):
         prefix = '../' if name == 'index' else '../../'
-        target = destination / 'docs' / ('' if name == 'index' else name)
+        target = language_root / 'docs' / ('' if name == 'index' else name)
         target.mkdir(parents=True, exist_ok=True)
-        article, toc = markdown((ROOT / 'website/content' / (name + '.md')).read_text(), './' if name == 'index' else '../')
+        content_root = ROOT / 'website/content' / ('ru' if language == 'ru' else '')
+        article, toc = markdown((content_root / (name + '.md')).read_text(), './' if name == 'index' else '../')
+        assets = ('../' if language == 'ru' else '') + prefix
+        switch = language_switch(destination, target, Path('docs') / ('' if name == 'index' else name), language)
+        edit_path = ('ru/' if language == 'ru' else '') + name + '.md'
         nav, previous_group = [], None
-        for key, label, group in PAGES:
+        for key, label, group in pages:
             url = ('./' if key == 'index' else key + '/') if name == 'index' else page_url(key)
             if group != previous_group:
                 if previous_group is not None:
@@ -159,19 +203,19 @@ def build(destination, repo):
         contents = ''.join('<a href="#' + anchor + '">' + html.escape(label) + '</a>' for anchor, label in toc)
         pagination = ''
         if index > 0:
-            key, label, _ = PAGES[index-1]
+            key, label, _ = pages[index-1]
             url = page_url(key) if name != 'index' else key + '/'
             pagination += '<a href="' + url + '">← ' + label + '</a>'
-        if index+1 < len(PAGES):
-            key, label, _ = PAGES[index+1]
+        if index+1 < len(pages):
+            key, label, _ = pages[index+1]
             url = page_url(key) if name != 'index' else key + '/'
             pagination += '<a href="' + url + '">' + label + ' →</a>'
-        page = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} — k0nnect</title><meta name="description" content="{title}: k0nnect guide to enrolling external servers into Kubernetes."><meta name="theme-color" content="#126b56"><link rel="icon" href="{prefix}assets/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="{prefix}assets/style.css"><script defer src="{prefix}assets/app.js"></script></head><body>
-<a class="skip" href="#main">Skip to content</a><header class="header"><div class="wrap"><a class="brand" href="{prefix}" aria-label="k0nnect home"><img src="{prefix}assets/logo.svg" width="34" height="34" alt="">k0nnect</a><button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav">Menu <span aria-hidden="true">☰</span></button><nav class="nav" id="site-nav" aria-label="Main navigation"><a href="{prefix}docs/">Documentation</a><a href="{repo}">GitHub ↗</a><span class="pill">Experimental</span></nav></div></header>
-<div class="wrap docs-shell"><button class="docs-menu" aria-expanded="false" aria-controls="docs-sidebar">Browse documentation ↓</button><aside class="sidebar" id="docs-sidebar" aria-label="Documentation navigation"><label class="sr-only" for="doc-search">Find a section</label><input class="doc-search" id="doc-search" type="search" placeholder="Find a section…"><nav>{''.join(nav)}</nav><p class="search-empty" hidden>No matching sections</p></aside><main class="doc-article" id="main"><div class="eyebrow">k0nnect / documentation</div>{article}<nav class="doc-end" aria-label="Previous and next pages">{pagination}</nav></main><aside class="toc" aria-label="On this page"><strong>On this page</strong>{contents}</aside></div><footer class="footer"><div class="wrap"><span>k0nnect · Experimental · k0s</span><div><a href="{repo}">Source code ↗</a><a href="{repo}/blob/main/website/content/{name}.md">Edit this page ↗</a></div></div></footer></body></html>'''
+        page = f'''<!doctype html><html lang="{language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} — k0nnect</title><meta name="description" content="{title}: {ui["description"]}"><meta name="theme-color" content="#126b56"><link rel="icon" href="{assets}assets/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="{assets}assets/style.css"><script defer src="{assets}assets/app.js"></script></head><body>
+<a class="skip" href="#main">{ui["skip"]}</a><header class="header"><div class="wrap"><a class="brand" href="{prefix}" aria-label="{ui["home"]}"><img src="{assets}assets/logo.svg" width="34" height="34" alt="">k0nnect</a>{switch}<button class="menu-toggle" aria-label="{ui["open_menu"]}" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-label">{ui["menu"]}</span> <span aria-hidden="true">☰</span></button><nav class="nav" id="site-nav" aria-label="{ui["navigation"]}"><a href="{prefix}docs/">{ui["documentation"]}</a><a href="{repo}">GitHub ↗</a><span class="pill">Experimental</span></nav></div></header>
+<div class="wrap docs-shell"><button class="docs-menu" aria-expanded="false" aria-controls="docs-sidebar">{ui["browse"]} ↓</button><aside class="sidebar" id="docs-sidebar" aria-label="{ui["browse"]}"><label class="sr-only" for="doc-search">{ui["find"]}</label><input class="doc-search" id="doc-search" type="search" placeholder="{ui["find"]}…"><nav>{''.join(nav)}</nav><p class="search-empty" hidden>{ui["empty"]}</p></aside><main class="doc-article" id="main"><div class="eyebrow">k0nnect / documentation</div>{article}<nav class="doc-end" aria-label="{ui["adjacent"]}">{pagination}</nav></main><aside class="toc" aria-label="{ui["toc"]}"><strong>{ui["toc"]}</strong>{contents}</aside></div><footer class="footer"><div class="wrap"><span>k0nnect · Experimental · k0s</span><div><a href="{repo}">{ui["source"]} ↗</a><a href="{repo}/blob/main/website/content/{edit_path}">{ui["edit"]} ↗</a></div></div></footer></body></html>'''
         (target / 'index.html').write_text(page)
-    (destination / '404.html').write_text('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Page not found — k0nnect</title><body style="font:18px/1.7 system-ui;max-width:600px;margin:12vh auto;padding:24px"><h1>Page not found</h1><p>This documentation page may have moved.</p><a href="' + repo + '">Open the k0nnect repository →</a></body></html>')
-    print(f'Built {len(PAGES)+2} pages in {destination}')
+    (language_root / '404.html').write_text(f'<!doctype html><html lang="{language}"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{ui["missing"]} — k0nnect</title><body style="font:18px/1.7 system-ui;max-width:600px;margin:12vh auto;padding:24px"><h1>{ui["missing"]}</h1><p>{ui["moved"]}</p><a href="{repo}">{ui["open_repo"]} →</a></body></html>')
+
 
 
 if __name__ == '__main__':

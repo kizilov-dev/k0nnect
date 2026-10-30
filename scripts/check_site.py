@@ -8,10 +8,12 @@ import re
 root=Path(__file__).resolve().parent.parent/'site'
 class Document(HTMLParser):
     def __init__(self):
-        super().__init__(); self.ids=set(); self.links=[]; self.h1=0; self.lang=None
+        super().__init__(); self.ids=set(); self.links=[]; self.h1=0; self.lang=None; self.languages=[]
     def handle_starttag(self,tag,attrs):
         a=dict(attrs)
         if tag=='html': self.lang=a.get('lang')
+        if tag=='option':
+            self.links.append(a['value']); self.languages.append((a.get('lang'), 'selected' in a))
         if tag=='h1': self.h1+=1
         if 'id' in a:self.ids.add(a['id'])
         for key in ('href','src'):
@@ -19,12 +21,16 @@ class Document(HTMLParser):
 docs={}
 for p in root.rglob('*.html'):
     text=p.read_text()
-    assert not re.search(r'[А-Яа-яЁё]', text), f'Untranslated content in {p}'
     assert 'k8nnect' not in text.lower(), f'Outdated branding in {p}'
     assert '{{' not in text, f'Unresolved template in {p}'
     doc=Document();doc.feed(text);docs[p.resolve()]=doc
     assert doc.h1==1,f'Expected one H1: {p}'
-    assert doc.lang=='en',f'Missing lang: {p}'
+    assert doc.lang in ('en','ru'),f'Missing lang: {p}'
+    if doc.lang == 'en':
+        assert not re.search(r'[А-Яа-яЁё]', re.sub(r'<option[^>]*>.*?</option>', '', text)), f'Untranslated content in {p}'
+    if p.name != '404.html':
+        assert doc.languages == [('en',doc.lang=='en'),('ru',doc.lang=='ru')], f'Invalid language switch: {p}'
+assert {doc.lang for doc in docs.values()} == {'en','ru'}, 'Both languages must be built'
 for p,doc in docs.items():
     for link in doc.links:
         url=urlsplit(link)

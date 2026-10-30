@@ -68,3 +68,10 @@
  .doc-article h1{font-size:31px}
 }
 @media(pointer:coarse){.copy{min-height:44px}.button,.menu-toggle,.docs-menu{min-height:48px}}
+
+/* Both languages remain reachable from the compact mobile header. */
+.header .brand{margin-right:auto}
+.language-select{font:inherit;font-size:13px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:5px;min-height:44px;padding:6px 8px;max-width:112px;cursor:pointer}
+.language-select:focus-visible{outline:3px solid #c9a644;outline-offset:4px}
+@media(max-width:760px){.header .wrap{gap:10px}.language-select{font-size:13px;width:98px;flex-shrink:0}.menu-toggle{flex-shrink:0;gap:6px}}
+@media(max-width:380px){.menu-label{display:none}.menu-toggle{width:44px;padding:4px}.brand{gap:7px}.brand img{width:30px;height:30px}}
