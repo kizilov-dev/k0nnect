@@ -73,6 +73,9 @@ func validateNetwork(n Network) error {
 	if n.MTU < 1280 || n.MTU > 1440 || n.Port < 30000 || n.Port > 32767 {
 		return fmt.Errorf("invalid network MTU or port")
 	}
+	if n.NodeMTU != 0 && (n.NodeMTU < n.MTU || n.NodeMTU > 9000) {
+		return fmt.Errorf("invalid node MTU")
+	}
 	if !model.KeyValid(n.WorkerKey) {
 		return fmt.Errorf("invalid Worker public key")
 	}
@@ -279,7 +282,15 @@ func EnsureWorker(ctx context.Context, path string) error {
 	if e = syncWG(ctx, WorkerNS, "eth1", workerConfiguration(n, key)); e != nil {
 		return e
 	}
-	for _, args := range [][]string{{"link", "set", "lo", "up"}, {"address", "replace", n.WorkerAddress + "/32", "dev", "eth1"}, {"link", "set", "eth1", "mtu", strconv.Itoa(n.MTU), "up"}, {"route", "replace", "default", "dev", "eth1", "proto", "242", "metric", "10"}} {
+	// CNIs derive Pod MTU from eth1. A smaller value than on existing nodes makes
+	// the VDS Pods silently drop larger packets arriving through the CNI tunnel,
+	// so eth1 matches the nodes and WireGuard fragments outer packets instead.
+	// The default route keeps the transport MTU for the Worker's own traffic.
+	linkMTU := n.MTU
+	if n.NodeMTU > linkMTU {
+		linkMTU = n.NodeMTU
+	}
+	for _, args := range [][]string{{"link", "set", "lo", "up"}, {"address", "replace", n.WorkerAddress + "/32", "dev", "eth1"}, {"link", "set", "eth1", "mtu", strconv.Itoa(linkMTU), "up"}, {"route", "replace", "default", "dev", "eth1", "proto", "242", "metric", "10", "mtu", strconv.Itoa(n.MTU)}} {
 		if _, e = command(ctx, "ip", append([]string{"-n", WorkerNS}, args...)...); e != nil {
 			return e
 		}
@@ -306,6 +317,34 @@ func workerConfiguration(n Network, key string) []byte {
 	}
 	return []byte(cfg.String())
 }
+
+// NodeMTUAnnotation publishes the MTU of the interface carrying a gateway's InternalIP.
+const NodeMTUAnnotation = "k8nnect.io/node-mtu"
+
+func addressMTU(ctx context.Context, ip string) (int, error) {
+	b, e := command(ctx, "ip", "-j", "-4", "address", "show")
+	if e != nil {
+		return 0, e
+	}
+	var links []struct {
+		MTU   int `json:"mtu"`
+		Addrs []struct {
+			Local string `json:"local"`
+		} `json:"addr_info"`
+	}
+	if e = json.Unmarshal(b, &links); e != nil {
+		return 0, e
+	}
+	for _, l := range links {
+		for _, a := range l.Addrs {
+			if a.Local == ip && l.MTU >= 1280 {
+				return l.MTU, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("no interface carries node InternalIP %q", ip)
+}
+
 func Agent(ctx context.Context, kind, path string) error {
 	if kind == "worker-network" {
 		return EnsureWorker(ctx, path)
@@ -339,7 +378,15 @@ func Agent(ctx context.Context, kind, path string) error {
 	if e != nil {
 		return e
 	}
-	if _, e = c.Do(ctx, "PATCH", "/api/v1/nodes/"+node, kube.Object{"metadata": kube.Object{"annotations": kube.Object{"k8nnect.io/wireguard-public-key": pub}}}); e != nil {
+	self, e := c.Get(ctx, "/api/v1/nodes/"+node)
+	if e != nil {
+		return e
+	}
+	mtu, e := addressMTU(ctx, address(self, "InternalIP"))
+	if e != nil {
+		return e
+	}
+	if _, e = c.Do(ctx, "PATCH", "/api/v1/nodes/"+node, kube.Object{"metadata": kube.Object{"annotations": kube.Object{"k8nnect.io/wireguard-public-key": pub, NodeMTUAnnotation: strconv.Itoa(mtu)}}}); e != nil {
 		return e
 	}
 	for {

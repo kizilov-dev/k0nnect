@@ -150,17 +150,7 @@ func Disconnect(ctx context.Context, k *kube.Client, c Config, drain bool, out i
 		return e
 	}
 	defer r.Close()
-	stop := `if test -f /etc/k8nnect/managed.json; then
-python3 -c ` + Quote("import json; assert json.load(open('/etc/k8nnect/managed.json'))['name']=="+fmt.Sprintf("%q", c.Name)) + `
-if systemctl is-active --quiet k0sworker.service; then
- TASK_K8NNECT_IDS=$(/usr/local/bin/k0s ctr --namespace=k8s.io tasks list -q)
- for TASK_K8NNECT_ID in $TASK_K8NNECT_IDS; do /usr/local/bin/k0s ctr --namespace=k8s.io tasks kill --signal SIGKILL --all "$TASK_K8NNECT_ID"; done
-fi
-for TASK_K8NNECT_UNIT in k0sworker.service k8nnect-agent.service k8nnect-network.service; do
- if systemctl cat "$TASK_K8NNECT_UNIT" >/dev/null 2>&1; then systemctl stop "$TASK_K8NNECT_UNIT"; systemctl disable "$TASK_K8NNECT_UNIT"; fi
-done
-if test -f /etc/k8nnect/worker.json; then /usr/local/bin/k8nnect worker-remove --config /etc/k8nnect/worker.json; fi
-fi`
+	stop := stopWorkerScript(c)
 	if _, e = r.Run(ctx, stop, nil); e != nil {
 		return fmt.Errorf("stop owned Worker services: %w", e)
 	}
@@ -256,4 +246,33 @@ fi`
 	}
 	fmt.Fprintln(out, "Disconnected. K0s data, installed packages and owner-only keys on the VDS are preserved for recovery; no user data was reset.")
 	return nil
+}
+
+// stopWorkerScript stops the managed Worker on the VDS and removes the runtime
+// state of the deleted Node, keeping installed binaries and the managed marker.
+func stopWorkerScript(c Config) string {
+	return `if test -f /etc/k8nnect/managed.json; then
+python3 -c ` + Quote("import json; assert json.load(open('/etc/k8nnect/managed.json'))['name']=="+fmt.Sprintf("%q", c.Name)) + `
+if systemctl is-active --quiet k0sworker.service; then
+ TASK_K8NNECT_IDS=$(/usr/local/bin/k0s ctr --namespace=k8s.io tasks list -q)
+ # kubelet may delete a task between list and kill; k0sworker is stopped below anyway.
+ for TASK_K8NNECT_ID in $TASK_K8NNECT_IDS; do /usr/local/bin/k0s ctr --namespace=k8s.io tasks kill --signal SIGKILL --all "$TASK_K8NNECT_ID" || true; done
+fi
+for TASK_K8NNECT_UNIT in k0sworker.service k8nnect-agent.service k8nnect-network.service; do
+ if systemctl cat "$TASK_K8NNECT_UNIT" >/dev/null 2>&1; then systemctl stop "$TASK_K8NNECT_UNIT"; systemctl disable "$TASK_K8NNECT_UNIT"; fi
+done
+# containerd shims outlive k0sworker. They and their containers would keep the old
+# Worker network namespace, with CNI devices of the deleted Node, alive.
+for TASK_K8NNECT_PID in $(pgrep -f '^/var/lib/k0s/bin/containerd-shim-runc-v2 .*-address /run/k0s/containerd\.sock' || true); do
+ pkill -KILL -P "$TASK_K8NNECT_PID" || true
+ kill -KILL "$TASK_K8NNECT_PID" || true
+done
+# Node-local CNI state belongs to the deleted Node: a reconnected Node receives a
+# new Pod CIDR, and stale subnet leases or bridges would block Pod sandboxes.
+# Calico and Cilium mount cgroup2 below their state directories.
+for TASK_K8NNECT_MOUNT in $(findmnt -rn -o TARGET | grep -E '^/run/(calico|cilium)(/|$)' | sort -r); do umount "$TASK_K8NNECT_MOUNT"; done
+rm -rf /etc/cni/net.d /var/lib/cni /run/flannel /var/run/calico /var/lib/calico /var/run/cilium /var/lib/cilium /var/lib/kube-router /sys/fs/bpf/cilium
+rm -f /sys/fs/bpf/tc/globals/cilium_*
+if test -f /etc/k8nnect/worker.json; then /usr/local/bin/k8nnect worker-remove --config /etc/k8nnect/worker.json; fi
+fi`
 }

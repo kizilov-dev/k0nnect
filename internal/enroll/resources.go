@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"k8nnect/internal/kube"
 )
@@ -16,6 +17,15 @@ import (
 func ensureNamespace(ctx context.Context, k *kube.Client, c Config) error {
 	path := "/api/v1/namespaces/" + c.Namespace
 	existing, e := k.Get(ctx, path)
+	// A namespace still terminating after a disconnect rejects new objects.
+	for deadline := time.Now().Add(3 * time.Minute); e == nil && kube.Str(kube.Map(existing, "metadata"), "deletionTimestamp") != ""; existing, e = k.Get(ctx, path) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("namespace %s is still terminating", c.Namespace)
+		}
+		if e = pause(ctx, 3*time.Second); e != nil {
+			return e
+		}
+	}
 	if e == nil {
 		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "annotations"), "k8nnect.io/connection") != c.Name {
 			return fmt.Errorf("namespace is not owned by this connection")
@@ -116,6 +126,11 @@ func gatewayResources(ctx context.Context, k *kube.Client, c Config, networks ma
 	ds := kube.Object{"apiVersion": "apps/v1", "kind": "DaemonSet", "metadata": kube.Object{"name": "gateway", "namespace": c.Namespace}, "spec": kube.Object{"selector": kube.Object{"matchLabels": labels}, "template": kube.Object{"metadata": kube.Object{"labels": labels}, "spec": podSpec}}}
 	if e = applyOwned(ctx, k, c, "/apis/apps/v1/namespaces/"+c.Namespace+"/daemonsets", "gateway", ds); e != nil {
 		return e
+	}
+	if c.GatewayHostPortOnly {
+		// The hostNetwork gateway listens on the port directly; a NodePort
+		// Service would make the CNI reject that socket.
+		return ownedDelete(ctx, k, ns+"/services/gateway", c.Name)
 	}
 	service := kube.Object{"apiVersion": "v1", "kind": "Service", "metadata": kube.Object{"name": "gateway", "namespace": c.Namespace}, "spec": kube.Object{"type": "NodePort", "externalTrafficPolicy": "Local", "selector": labels, "ports": []any{kube.Object{"name": "wireguard", "protocol": "UDP", "port": c.Port, "targetPort": c.Port, "nodePort": c.Port}}}}
 	return applyOwned(ctx, k, c, ns+"/services", "gateway", service)

@@ -4,7 +4,7 @@
 
 ## Worker в отдельной сети
 
-На VDS создаётся network namespace `k8nnect`. В нём работают kubelet и встроенный containerd k0s. WireGuard-интерфейс внутри namespace называется `eth1`: так существующая настройка Calico `interface=eth1` выбирает транспортный адрес новой ноды.
+На VDS создаётся network namespace `k8nnect`. В нём работают kubelet и встроенный containerd k0s. WireGuard-интерфейс внутри namespace называется `eth1`: так существующая настройка CNI выбирает транспортный адрес новой ноды — Calico `interface=eth1`, Flannel `--iface=eth1`, Cilium `devices=eth1`, а kube-router берёт InternalIP ноды. Pod с hostNetwork на VDS, включая агенты CNI, тоже работают в этом namespace.
 
 WireGuard-устройство создаётся в основной сети хоста, затем переносится в namespace. Его UDP socket сохраняет исходную сеть, поэтому зашифрованный трафик использует физическое подключение VDS. Физические адреса сервера не меняются.
 
@@ -12,7 +12,7 @@ WireGuard-устройство создаётся в основной сети �
 
 DaemonSet запускает gateway-агенты с hostNetwork и NET_ADMIN. Агент владеет интерфейсом `k8ngw0`, маршрутом /32 к новому Worker и правилами iptables с меткой соединения.
 
-Основной gateway обеспечивает доступ из namespace Worker к приватному API, konnectivity и внешней сети. Исходный транспортный адрес Worker маскируется при пересылке через физическую сеть. Отдельные адреса исходных нод доступны через соответствующие WireGuard peers, чтобы Calico доставлял VXLAN-пакеты правильному Worker.
+Основной gateway обеспечивает доступ из namespace Worker к приватному API, konnectivity и внешней сети. Исходный транспортный адрес Worker маскируется при пересылке через физическую сеть. Отдельные адреса исходных нод доступны через соответствующие WireGuard peers, чтобы инкапсулированный Pod-трафик CNI (VXLAN Calico, Flannel и Cilium, IPIP kube-router) доходил до правильного Worker без маскировки.
 
 Нода без публичного адреса инициирует соединение к VDS. WireGuard изучает её endpoint из аутентифицированных пакетов. Первый публичный gateway имеет приоритет; автоматическое переключение при его отказе пока отсутствует.
 
@@ -22,10 +22,10 @@ DaemonSet запускает gateway-агенты с hostNetwork и NET_ADMIN. �
 | --- | --- |
 | k8nnect | Транспорт, gateway, bootstrap, сверка конфигурации и проверки |
 | k0s / kubelet | Регистрация ноды, запуск runtime, обычный жизненный цикл Pod |
-| Calico | IPAM, Pod-маршруты, VXLAN и сетевые политики |
+| CNI | IPAM, Pod-маршруты, инкапсуляция и сетевые политики |
 | Kubernetes | API, scheduler, RBAC, bootstrap CSR и Service |
 
-`Node.spec.podCIDR` не используется как универсальный источник Calico-маршрутов: фактическое распределение адресов определяет IPAM CNI.
+`Node.spec.podCIDR` не используется как универсальный источник маршрутов: фактическое распределение адресов определяет IPAM CNI. k8nnect не меняет настройки CNI, а только проверяет, что они совместимы с транспортом ([матрица CNI](compatibility.md)).
 
 ## Bootstrap через Kubernetes API
 

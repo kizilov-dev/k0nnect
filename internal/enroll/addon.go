@@ -65,6 +65,7 @@ func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 		kube.Object{"apiGroups": []string{""}, "resources": []string{"namespaces", "services"}, "verbs": []string{"get", "list"}},
 		kube.Object{"apiGroups": []string{"apps"}, "resources": []string{"daemonsets"}, "verbs": []string{"get"}},
 		kube.Object{"apiGroups": []string{"crd.projectcalico.org"}, "resources": []string{"ippools"}, "verbs": []string{"get", "list"}},
+		kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": cniConfigMaps, "verbs": []string{"get"}},
 		kube.Object{"apiGroups": []string{"certificates.k8s.io"}, "resources": []string{"certificatesigningrequests"}, "verbs": []string{"get", "list"}},
 		kube.Object{"apiGroups": []string{"certificates.k8s.io"}, "resources": []string{"certificatesigningrequests/approval"}, "verbs": []string{"update"}},
 		kube.Object{"apiGroups": []string{"certificates.k8s.io"}, "resources": []string{"signers"}, "resourceNames": []string{"kubernetes.io/kubelet-serving"}, "verbs": []string{"approve"}},

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -104,36 +105,11 @@ func discover(ctx context.Context, k *kube.Client, c *Config) ([]Peer, kube.Obje
 		a[3] = byte(i + 1)
 		peers[i].Address = netip.AddrFrom4(a).String()
 	}
-	pools, e := k.Get(ctx, "/apis/crd.projectcalico.org/v1/ippools")
-	if e != nil {
-		return nil, nil, "", fmt.Errorf("Calico IPPool discovery: %w", e)
-	}
-	if len(kube.Items(pools, "items")) == 0 {
-		return nil, nil, "", fmt.Errorf("no Calico IPPools")
-	}
-	for _, v := range kube.Items(pools, "items") {
-		spec := kube.Map(kube.As(v), "spec")
-		p, e := netip.ParsePrefix(kube.Str(spec, "cidr"))
-		if e != nil || !p.Addr().Is4() || p.Overlaps(network) || kube.Str(spec, "vxlanMode") != "Always" || kube.Str(spec, "ipipMode") != "Never" {
-			return nil, nil, "", fmt.Errorf("requires non-overlapping Calico IPv4 VXLAN Always pools")
-		}
-	}
-	ds, e := k.Get(ctx, "/apis/apps/v1/namespaces/calico-system/daemonsets/calico-node")
+	cni, e := detectCNI(ctx, k, network)
 	if e != nil {
 		return nil, nil, "", e
 	}
-	method := ""
-	for _, container := range kube.Items(kube.Map(kube.Map(kube.Map(ds, "spec"), "template"), "spec"), "containers") {
-		for _, v := range kube.Items(kube.As(container), "env") {
-			env := kube.As(v)
-			if kube.Str(env, "name") == "IP_AUTODETECTION_METHOD" {
-				method = kube.Str(env, "value")
-			}
-		}
-	}
-	if method != "interface=eth1" {
-		return nil, nil, "", fmt.Errorf("initial managed Calico adapter requires IP autodetection interface=eth1; found %q", method)
-	}
+	c.CNI, c.GatewayHostPortOnly = cni.Name, cni.HostPortOnly
 	services, e := k.Get(ctx, "/api/v1/services")
 	if e != nil {
 		return nil, nil, "", e
@@ -164,11 +140,12 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 		return e
 	}
 	log := func(s string) { fmt.Fprintln(out, s) }
-	log("Discovering k0s and Calico compatibility")
+	log("Discovering k0s and CNI compatibility")
 	peers, source, minor, e := discover(ctx, k, &c)
 	if e != nil {
 		return e
 	}
+	log("Detected CNI: " + c.CNI)
 	if existing, err := k.Get(ctx, "/api/v1/nodes/"+c.NodeName); err == nil {
 		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "labels"), "k8nnect.io/connection") != c.Name {
 			return fmt.Errorf("refusing an existing node not owned by this connection")
@@ -218,8 +195,10 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 		return e
 	}
 	deadline := time.Now().Add(5 * time.Minute)
+	nodeMTU := 0
 	for {
 		ready := true
+		nodeMTU = 0
 		pods, e := k.Get(ctx, "/api/v1/namespaces/"+c.Namespace+"/pods?labelSelector=app%3Dk8nnect-gateway")
 		if e != nil {
 			return e
@@ -239,9 +218,13 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 			if e != nil {
 				return e
 			}
-			peers[i].PublicKey = kube.Str(kube.Map(kube.Map(n, "metadata"), "annotations"), "k8nnect.io/wireguard-public-key")
-			if peers[i].PublicKey == "" || !readyNodes[peers[i].Name] {
+			annotations := kube.Map(kube.Map(n, "metadata"), "annotations")
+			peers[i].PublicKey = kube.Str(annotations, "k8nnect.io/wireguard-public-key")
+			mtu, err := strconv.Atoi(kube.Str(annotations, NodeMTUAnnotation))
+			if peers[i].PublicKey == "" || err != nil || !readyNodes[peers[i].Name] {
 				ready = false
+			} else if nodeMTU == 0 || mtu < nodeMTU {
+				nodeMTU = mtu
 			}
 		}
 		if ready {
@@ -255,6 +238,9 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 		}
 	}
 	worker := Network{Name: c.Name, NodeName: c.NodeName, CIDR: c.TransportCIDR, Address: c.WorkerAddress, WorkerAddress: c.WorkerAddress, WorkerEndpoint: fmt.Sprintf("%s:%d", c.Host, c.Port+1), WorkerKey: workerKey, Port: c.Port + 1, MTU: c.MTU, Peers: peers}
+	if nodeMTU > c.MTU {
+		worker.NodeMTU = nodeMTU
+	}
 	data, e := json.Marshal(worker)
 	if e != nil {
 		return e
@@ -277,7 +263,13 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 		return fmt.Errorf("controller reachability over gateway failed: %w", e)
 	}
 	existing, e := k.Get(ctx, "/api/v1/nodes/"+c.NodeName)
-	if e == nil && nodesReady(existing) {
+	// Node readiness lags behind a stopped kubelet, e.g. after an interrupted
+	// disconnect; only a running k0sworker lets the Node state be trusted.
+	service, err := r.Run(ctx, "systemctl is-active k0sworker.service || true", nil)
+	if err != nil {
+		return err
+	}
+	if e == nil && nodesReady(existing) && strings.TrimSpace(string(service)) == "active" {
 		log("Worker is already Ready; network reconciled")
 		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "annotations"), "k8nnect.io/verified") == "" {
 			return VerifyNode(ctx, k, c, out)
@@ -326,7 +318,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 			return e
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("Worker did not reach Ready; inspect k0sworker and Calico logs")
+			return fmt.Errorf("Worker did not reach Ready; inspect k0sworker and %s logs", c.CNI)
 		}
 		if e = pause(ctx, 5*time.Second); e != nil {
 			return e

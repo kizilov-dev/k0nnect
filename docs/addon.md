@@ -6,11 +6,19 @@ transport; the older transport package has a driver interface, but this new
 installer currently uses WireGuard directly. Alternative enrollment transports
 still require implementation.
 
-## Supported initial profile
+## Supported profiles
 
-Linux/amd64 k0s workers, an accessible Kubernetes API, Calico IPv4 VXLAN Always /
-IPIP Never, and Calico node address autodetection `interface=eth1`. The installer
-rejects other profiles. This is not a claim of CNI independence. Linux VDS with
+Linux/amd64 k0s workers, an accessible Kubernetes API and one of these CNIs,
+detected from its DaemonSet:
+
+| CNI | Required configuration |
+| --- | --- |
+| Calico | IPv4 VXLAN Always / IPIP Never pools, autodetection `interface=eth1` |
+| Flannel | `vxlan` backend without DirectRouting, `--kube-subnet-mgr`, `--iface=eth1` or none |
+| Cilium | `routing-mode=tunnel` (VXLAN/Geneve), cluster-pool or kubernetes IPAM, `devices` empty or `eth1`, no transparent encryption |
+| kube-router | `--run-router`, overlay enabled (`subnet` or `full`), full-mesh BGP |
+
+The installer rejects other configurations and never patches the CNI. Linux VDS with
 root SSH, apt, systemd, Python 3, kernel WireGuard and Internet package/release
 access is required. Cluster workers also need package/image access. The initial
 implementation supports one connection per cluster and one managed worker per VDS.
@@ -22,8 +30,9 @@ when the API permits bootstrap token creation and normal kubelet bootstrap.
 ## Network design
 
 On the VDS, kubelet and embedded containerd run in network namespace `k8nnect`.
-Its WireGuard interface is named `eth1` so this specific Calico autodetection
-profile chooses the transport address. The device is created in the host namespace
+Its WireGuard interface is named `eth1` so the existing CNI node address selection
+(Calico `interface=eth1`, Flannel `--iface=eth1`, Cilium `devices=eth1`, the
+kube-router Node InternalIP) chooses the transport address. The device is created in the host namespace
 and moved into the worker namespace, retaining its UDP socket in the host network.
 The VDS physical interfaces retain their addresses.
 
@@ -31,15 +40,22 @@ Gateway agents run on the existing workers using hostNetwork and NET_ADMIN. They
 own interface `k8ngw0`, worker /32 routes with protocol 242 and comment-tagged
 iptables forwarding/SNAT rules. The worker namespace default route uses the first
 public gateway to reach the private controller, konnectivity and Internet.
-Specific original node IP /32 routes keep Calico VXLAN endpoints reachable through
-the corresponding gateway. Calico retains ownership of Pod routes and pools.
+Specific original node IP /32 routes keep CNI tunnel endpoints (VXLAN, Geneve,
+IPIP) reachable through the corresponding gateway without masquerading. The CNI
+retains ownership of Pod routes and pools.
 A gateway without a public address initiates WireGuard to the public VDS and its
 endpoint is learned from authenticated packets. This requires outbound UDP and
 return traffic; it is not arbitrary NAT traversal. There is no primary gateway
-failover yet. The transport MTU is 1400; existing Calico MTU is not patched, so
-fragmentation of its VXLAN packets must be verified on the actual installation.
+failover yet. The transport MTU is 1400 (gateway `k8ngw0` and the worker default
+route). The worker `eth1` instead carries the existing nodes' interface MTU,
+published by gateway agents as `k8nnect.io/node-mtu`: CNIs derive the Pod MTU from
+it, and a smaller Pod MTU on the VDS made larger packets arriving through Flannel
+or Cilium tunnels vanish at the Pod veth. Larger outer packets are fragmented by
+the kernel; the CNI MTU itself is not patched.
 
-UDP NodePort 31820 is used on existing nodes and UDP 31821 on the VDS. The exact
+UDP NodePort 31820 is used on existing nodes and UDP 31821 on the VDS. Cilium with
+kube-proxy replacement rejects bind(2) on NodePort Service ports, so with it the
+gateway listens on the port without a Service. The exact
 ports and worker subnet are configurable. Keys are generated on their hosts and
 stored root-only. An SSH Ed25519 fingerprint is pinned before authentication.
 
@@ -103,8 +119,10 @@ bin/k8nnect disconnect --drain --kubeconfig /secure/cluster.yaml --config /secur
 ```
 
 Removal scales down the installer, cordons and drains the worker respecting PDBs,
-stops managed services/runtime tasks and removes owned network resources and node.
+stops managed services/runtime tasks and remaining k0s containerd shims, removes
+the node's CNI state on the VDS and removes owned network resources and node.
 Cleanup validates ownership and does not reset unrelated hosts. Installed packages,
-k0s data and recovery keys remain on the VDS. Live removal still needs validation.
+k0s data and recovery keys remain on the VDS.
 
-Live enrollment results: [2026-10-30 worker report](worker-enrollment-2026-10-30.md).
+Live results: [2026-10-30 worker report](worker-enrollment-2026-10-30.md),
+[2026-10-30 CNI matrix](cni-matrix-2026-10-30.md).

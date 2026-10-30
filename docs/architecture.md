@@ -1,10 +1,11 @@
 # Architecture and decisions
 
 Status: experimental. The original static kubeadm/Flannel profile is described
-below. The newer API-driven k0s/Calico connector uses a dedicated worker network
-namespace and gateway agents; its different routes, firewall ownership and
-bootstrap are described in [addon architecture](addon.md). Live enrollment and
-workload checks passed for that concrete profile: [report](worker-enrollment-2026-10-30.md).
+below. The newer API-driven k0s connector (Calico, Flannel, Cilium or kube-router)
+uses a dedicated worker network namespace and gateway agents; its different routes,
+firewall ownership and bootstrap are described in [addon architecture](addon.md).
+Live enrollment and workload checks passed for those concrete profiles:
+[Calico report](worker-enrollment-2026-10-30.md), [CNI matrix](cni-matrix-2026-10-30.md).
 Production compatibility and operational safety are not certified.
 
 ## ADR-001: separate product modes
@@ -37,7 +38,9 @@ Supported declaration: Linux, private non-overlapping IPv4 networks, kubeadm,
 Flannel VXLAN with DirectRouting disabled. This is a candidate compatibility
 profile, not certification of every release. The lab must record concrete kernel,
 Kubernetes, Flannel and iproute2 versions before a profile can be certified.
-Calico, Kube-router, Cilium, Flannel host-gw and dual stack are rejected.
+In this static profile Calico, Kube-router, Cilium, Flannel host-gw and dual stack
+are rejected; the k0s connector supports Calico, Flannel, Cilium and kube-router
+through its own worker namespace instead.
 
 The network adapter for a future profile must determine route ownership, IPAM
 sources, node address selection, encapsulation, encryption, policy behavior and
@@ -124,6 +127,7 @@ live stand. Complete that comparison before committing to a production dataplane
 4. Compare throughput, latency and CPU against direct WireGuard on the same VM
    pair. Set performance budgets from measured baselines.
 5. Evaluate Kilo against this same test matrix and document reuse decisions.
-6. Add k0s + Kube-router as a separate profile with real BGP/next-hop integration.
+6. k0s + kube-router works in the connector through its IPIP overlay; direct BGP
+   next-hop routing without overlay (`--enable-overlay=false`) remains rejected.
 7. Design authenticated enrollment and management APIs only after profile one
    passes its acceptance gates. Investigate Submariner for multi-cluster separately.

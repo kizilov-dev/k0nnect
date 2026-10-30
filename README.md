@@ -19,9 +19,11 @@ k8nnect устанавливает ПО на внешнем Linux-сервере
 существующими Workers и регистрирует новый kubelet в **том же кластере**. После
 проверок сервер участвует в обычном планировании Pod.
 
-Рабочий MVP проверен на **k0s 1.36.4 + Calico 3.32.2, IPv4 VXLAN**. Подключение
-независимых кластеров — отдельный, пока не реализованный режим. Поддержка других
-CNI не заявляется.
+Рабочий MVP проверен на **k0s 1.36.4** с четырьмя CNI: **Calico 3.32.2** (VXLAN),
+**Flannel 0.28.9** (VXLAN), **Cilium 1.20.1** (tunnel, kube-proxy replacement) и
+**kube-router 2.10.0** (BGP + IPIP overlay). CNI определяется автоматически; его
+настройки k8nnect не меняет, а несовместимые отвергает. Подключение независимых
+кластеров — отдельный, пока не реализованный режим.
 
 ## Что делает утилита
 
@@ -34,14 +36,14 @@ CNI не заявляется.
 - В режиме аддона поддерживает конфигурацию и сообщает состояние через ConfigMap.
 
 Физические интерфейсы сервера сохраняют свои адреса. Kubelet и containerd работают
-в отдельном network namespace; Calico остаётся владельцем Pod-маршрутов и IPAM.
+в отдельном network namespace; CNI кластера остаётся владельцем Pod-маршрутов и IPAM.
 
 ## Требования
 
 | Компонент | Поддерживаемая конфигурация |
 | --- | --- |
 | Кластер | k0s, Linux/amd64 Workers, одинаковая minor-версия Kubernetes |
-| CNI | Calico, IPv4, VXLAN Always, IPIP Never, `IP_AUTODETECTION_METHOD=interface=eth1` |
+| CNI | IPv4 с инкапсуляцией и выбором адреса ноды по `eth1`: Calico VXLAN, Flannel VXLAN, Cilium tunnel или kube-router с overlay — [подробно](website/content/compatibility.md) |
 | VDS | Linux/amd64, root SSH, systemd, apt, Python 3, поддержка WireGuard в ядре |
 | Доступ | kubeconfig с правами установки RBAC, gateway-агентов и worker bootstrap |
 | Сеть | Непересекающаяся приватная /24, UDP к gateway и VDS, доступ к пакетам и образам |
@@ -115,10 +117,15 @@ kubectl --kubeconfig /secure/cluster.yaml get node k8nnect-vds -o wide
 
 ## Проверено на живом стенде
 
-VDS стала Ready-нодой; прошли планирование Pod, TCP 64 КиБ и UDP
-1000/1422/8192 байт в обе стороны со всеми тремя исходными Workers, включая Worker
-без ExternalIP. Проверены Service DNS, kubelet logs/exec, повторная сверка аддона
-и перезапуск установленных сервисов. [Подробный отчёт](docs/worker-enrollment-2026-10-30.md).
+На четырёх управляемых кластерах публичного облака (k0s 1.36.4: Calico, Flannel, Cilium,
+kube-router) VDS прошла подключение, `disconnect --drain` и повторное подключение.
+Каждый раз проверялись планирование Pod, TCP 64 КиБ и UDP 1000/1422/8192 байт в обе
+стороны со всеми исходными Workers, Service DNS, kubelet logs и exec.
+[Отчёт по матрице CNI](docs/cni-matrix-2026-10-30.md).
+
+Первый стенд с Calico дополнительно проверил три исходных Workers, включая Worker
+без ExternalIP, повторную сверку аддона и перезапуск установленных сервисов.
+[Подробный отчёт](docs/worker-enrollment-2026-10-30.md).
 
 Это результат для конкретного профиля, а не сертификация любых кластеров.
 Полная перезагрузка VDS, NetworkPolicy, CSI и длительная нагрузка не проверены.

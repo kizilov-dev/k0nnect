@@ -142,7 +142,7 @@ func TestTokenHasBoundedExpiryAndWorkerOnlyUsage(t *testing.T) {
 func TestGeneratedScriptsParseAndPreserveData(t *testing.T) {
 	c := fixtureConfig()
 	c.ClusterID = "test-cluster"
-	for name, script := range map[string]string{"prepare": prepareScript(c), "network": networkUnitsScript(), "install": installScript(c, "k8nnect-test-vds")} {
+	for name, script := range map[string]string{"prepare": prepareScript(c), "network": networkUnitsScript(), "install": installScript(c, "k8nnect-test-vds"), "stop": stopWorkerScript(c)} {
 		t.Run(name, func(t *testing.T) {
 			cmd := exec.Command("bash", "-n")
 			cmd.Stdin = strings.NewReader(script)
@@ -156,6 +156,9 @@ func TestGeneratedScriptsParseAndPreserveData(t *testing.T) {
 	}
 	if !strings.Contains(installScript(c, "profile"), "NetworkNamespacePath=/run/netns/k8nnect") {
 		t.Fatal("Worker service is not isolated")
+	}
+	if !strings.Contains(installScript(c, "profile"), cniPluginsSHA256+"  cni-plugins.tgz") {
+		t.Fatal("CNI plugins are not verified against the pinned digest")
 	}
 }
 func TestPrivateGatewaysUseLearnedWireGuardEndpoints(t *testing.T) {

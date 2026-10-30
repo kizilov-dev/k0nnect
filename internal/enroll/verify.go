@@ -32,10 +32,18 @@ for host in sys.argv[1:]:
  print('TCP probe',host,flush=True)
  data=urllib.request.urlopen('http://'+host+':8080/payload',timeout=15).read()
  assert data==payload,'TCP/Service payload mismatch'
-s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(15)
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(5)
 for size in [1000,1422,8192]:
  print('UDP probe',size,sys.argv[1],flush=True)
- s.sendto(payload[:size],(sys.argv[1],8081));data,_=s.recvfrom(65535)
+ # A DF datagram above a smaller path MTU is dropped once while the kernel
+ # learns that MTU from ICMP; the next one is fragmented by the sender.
+ for attempt in range(3):
+  s.sendto(payload[:size],(sys.argv[1],8081))
+  try:
+   data,_=s.recvfrom(65535);break
+  except socket.timeout:
+   if attempt==2: raise
+   print('UDP retry after path MTU discovery',size,flush=True)
  assert data==payload[:size],'UDP fragmentation payload mismatch'
 print('PASS TCP 65536 bytes, Service DNS, UDP 1000/1422/8192 bytes',flush=True)
 `
@@ -58,6 +66,9 @@ func VerifyNode(ctx context.Context, k *kube.Client, c Config, out io.Writer) er
 	if err != nil {
 		return err
 	}
+	// A CNI may program a just-joined node on existing nodes asynchronously.
+	// Failures inside this window are retried; later ones are final.
+	settled := time.Now().Add(cniSettleTime(ctx, k))
 	checked := 0
 	for _, v := range kube.Items(nodes, "items") {
 		node := kube.As(v)
@@ -66,7 +77,16 @@ func VerifyNode(ctx context.Context, k *kube.Client, c Config, out io.Writer) er
 		}
 		internal := kube.Str(kube.Map(node, "metadata"), "name")
 		fmt.Fprintln(out, "Verifying external Worker against", internal)
-		if err = verifyNodePair(ctx, k, c, internal, out); err != nil {
+		for {
+			if err = verifyNodePair(ctx, k, c, internal, out); err == nil || time.Now().After(settled) {
+				break
+			}
+			fmt.Fprintln(out, "Verification failed while the CNI may still be converging; retrying:", err)
+			if err = pause(ctx, 30*time.Second); err != nil {
+				return err
+			}
+		}
+		if err != nil {
 			return err
 		}
 		checked++

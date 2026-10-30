@@ -31,7 +31,7 @@ func Check(ctx context.Context, k *kube.Client, c Config, out io.Writer) error {
 	if e = json.Unmarshal(b, &state); e != nil {
 		return e
 	}
-	result := kube.Object{"readOnly": true, "sshHostKeyVerified": true, "vds": state, "gatewayCandidates": peers, "kubernetesMinor": minor, "k0sVersion": c.K0sVersion, "controllerAddresses": kube.Str(kube.Map(source, "data"), "apiServerAddresses")}
+	result := kube.Object{"readOnly": true, "sshHostKeyVerified": true, "vds": state, "gatewayCandidates": peers, "kubernetesMinor": minor, "k0sVersion": c.K0sVersion, "cni": c.CNI, "controllerAddresses": kube.Str(kube.Map(source, "data"), "apiServerAddresses")}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	if e = enc.Encode(result); e != nil {

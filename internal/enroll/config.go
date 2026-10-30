@@ -24,6 +24,9 @@ type Config struct {
 	MTU            int    `json:"mtu"`
 	K0sVersion     string `json:"k0sVersion,omitempty"`
 	ClusterID      string `json:"-"`
+	CNI            string `json:"-"`
+	// GatewayHostPortOnly serves the gateway WireGuard port without a NodePort Service.
+	GatewayHostPortOnly bool `json:"-"`
 }
 
 var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
@@ -104,5 +107,8 @@ type Network struct {
 	Interface      string `json:"interface"`
 	Port           int    `json:"port"`
 	MTU            int    `json:"mtu"`
-	Peers          []Peer `json:"peers"`
+	// NodeMTU is the MTU of the existing nodes' interfaces. The Worker eth1
+	// carries it so the CNI on the VDS derives the same Pod MTU as elsewhere.
+	NodeMTU int    `json:"nodeMTU,omitempty"`
+	Peers   []Peer `json:"peers"`
 }
