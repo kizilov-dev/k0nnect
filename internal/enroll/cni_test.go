@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 // Fixtures mirror the DaemonSets and ConfigMaps of managed k0s clusters.

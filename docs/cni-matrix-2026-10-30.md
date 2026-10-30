@@ -82,7 +82,7 @@ initialization taint removed. Original workers stayed Ready throughout.
 
 The Cilium cluster's agents could not resolve the private API host name for about
 ten minutes after creation, so its nodes stayed NotReady; it recovered without
-intervention. This is unrelated to k8nnect.
+intervention. This is unrelated to k0nnect.
 
 ## Not covered
 

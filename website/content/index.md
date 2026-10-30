@@ -1,29 +1,29 @@
-# Документация
+# Documentation
 
-**k8nnect подключает внешнюю VDS как полноценный Worker к существующему Kubernetes-кластеру.** Установка начинается с SSH-доступа, а заканчивается проверкой обычных Pod на новой ноде.
+**k0nnect turns an external server into a worker in your existing Kubernetes cluster.** Enrollment starts with SSH access and ends with real Pod connectivity checks.
 
-Текущий рабочий профиль — k0s на Linux/amd64 с одним из CNI: Calico VXLAN, Flannel VXLAN, Cilium в режиме tunnel или kube-router с IPIP-overlay. Проект экспериментальный: успешные испытания конкретных конфигураций не означают поддержку всех версий CNI и облачных интеграций.
+The connector targets k0s on Linux/amd64 with explicitly validated Calico, Flannel, Cilium, and kube-router profiles. It is experimental: passing tests on specific configurations does not certify every CNI release or cloud integration.
 
-## С чего начать
+## Start here
 
-- [Быстрый старт](getting-started.md) — собрать CLI, подготовить SSH и установить аддон.
-- [Конфигурация](configuration.md) — поля JSON, адреса и учётные данные.
-- [Совместимость](compatibility.md) — требования к кластеру, VDS и сети.
-- [Архитектура](architecture.md) — namespace Worker, gateway и маршруты.
+- [Quick start](getting-started.md) — build the CLI, prepare SSH, and install the addon.
+- [Configuration](configuration.md) — connection settings, addresses, and credentials.
+- [Compatibility](compatibility.md) — cluster, server, and network requirements.
+- [Architecture](architecture.md) — worker isolation, gateways, and traffic paths.
 
-## Два способа запуска
+## Two ways to connect
 
-**Аддон** работает внутри существующего кластера: читает конфигурацию и SSH Secret, поддерживает соединение и сообщает статус. Это основной вариант для постоянного использования.
+**The addon** runs on the existing workers. It reads configuration and an SSH Secret, reconciles the connection, and reports its status. This is the persistent management option.
 
-**CLI** подключает сервер с рабочей машины командой `connect`. Конфигурацию сети на VDS затем поддерживает systemd-агент. Однократная команда не устанавливает управляющий Deployment.
+**The CLI** connects a server from your workstation with `connect`. A systemd agent maintains the server's network afterward. A one-off connection does not install the management Deployment.
 
-Оба варианта используют один механизм bootstrap и одинаковые проверки. Без `--kubeconfig` CLI ожидает внутрикластерный ServiceAccount.
+Both use the same bootstrap and verification logic. Without `--kubeconfig`, commands use an in-cluster ServiceAccount.
 
-## Что считать успехом
+## What success means
 
-Новая нода должна быть Ready, реальные Pod должны проходить сетевые проверки, а начальный taint `k8nnect.io/initializing` — отсутствовать. Проверяются TCP/UDP с каждым исходным Ready Worker, Service DNS, logs и exec.
+The node must be Ready, real workloads must pass verification, and the `k0nnect.io/initializing` taint must be absent. Checks cover scheduling, bidirectional TCP/UDP against every original Ready worker, Service DNS, logs, and exec.
 
-- [Эксплуатация](operations.md) — наблюдение, повторная проверка и удаление.
-- [Права и секреты](security.md) — границы доступа аддона.
-- [Проверки и результаты](verification.md) — тестовая матрица и подтверждённые ограничения.
-- [Диагностика](troubleshooting.md) — разбор типовых проблем.
+- [Operations](operations.md) — monitoring, rechecking, removal, and upgrades.
+- [Permissions and secrets](security.md) — the addon's access boundaries.
+- [Tests and results](verification.md) — the live test matrix and its limits.
+- [Troubleshooting](troubleshooting.md) — diagnosing common failures.

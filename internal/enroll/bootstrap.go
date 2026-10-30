@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 func BootstrapDocument(server string, ca []byte, token string) (string, error) {
@@ -46,7 +46,7 @@ func issueToken(ctx context.Context, k *kube.Client, c Config) (string, string, 
 	secret := hex.EncodeToString(b)
 	collection := "/api/v1/namespaces/kube-system/secrets"
 	if old, err := k.Get(ctx, collection+"/"+name); err == nil {
-		if kube.Str(kube.Map(kube.Map(old, "metadata"), "labels"), "k8nnect.io/connection") != c.Name {
+		if kube.Str(kube.Map(kube.Map(old, "metadata"), "labels"), "k0nnect.io/connection") != c.Name {
 			return "", "", fmt.Errorf("bootstrap token ID collides with a foreign token")
 		}
 		if err = k.Delete(ctx, collection+"/"+name); err != nil {
@@ -55,7 +55,7 @@ func issueToken(ctx context.Context, k *kube.Client, c Config) (string, string, 
 	} else if !kube.Code(err, 404) {
 		return "", "", err
 	}
-	obj := kube.Object{"apiVersion": "v1", "kind": "Secret", "metadata": kube.Object{"name": name, "namespace": "kube-system", "labels": kube.Object{"k8nnect.io/connection": c.Name}}, "type": "bootstrap.kubernetes.io/token", "stringData": kube.Object{"token-id": id, "token-secret": secret, "usage-bootstrap-authentication": "true", "description": "k8nnect short-lived k0s Worker enrollment", "expiration": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)}}
+	obj := kube.Object{"apiVersion": "v1", "kind": "Secret", "metadata": kube.Object{"name": name, "namespace": "kube-system", "labels": kube.Object{"k0nnect.io/connection": c.Name}}, "type": "bootstrap.kubernetes.io/token", "stringData": kube.Object{"token-id": id, "token-secret": secret, "usage-bootstrap-authentication": "true", "description": "k0nnect short-lived k0s Worker enrollment", "expiration": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)}}
 	if _, e := k.Do(ctx, "POST", "/api/v1/namespaces/kube-system/secrets", obj); e != nil {
 		return "", "", e
 	}
@@ -63,7 +63,7 @@ func issueToken(ctx context.Context, k *kube.Client, c Config) (string, string, 
 	return name, encoded, e
 }
 func workerProfile(ctx context.Context, k *kube.Client, c Config, source kube.Object, minor string) (string, error) {
-	name := "k8nnect-" + c.Name
+	name := "k0nnect-" + c.Name
 	data := kube.Map(source, "data")
 	copyData := kube.Object{}
 	for key, v := range data {
@@ -76,7 +76,7 @@ func workerProfile(ctx context.Context, k *kube.Client, c Config, source kube.Ob
 	// The provider's standalone containerd cgroup is absent on a fresh k0s worker.
 	delete(conf, "kubeletCgroups")
 	delete(conf, "kubeReservedCgroup")
-	conf["resolvConf"] = "/etc/k8nnect/resolv.conf"
+	conf["resolvConf"] = "/etc/k0nnect/resolv.conf"
 	b, e := json.Marshal(conf)
 	if e != nil {
 		return "", e
@@ -99,6 +99,6 @@ func workerProfile(ctx context.Context, k *kube.Client, c Config, source kube.Ob
 	if e := applyOwned(ctx, k, c, rbac+"/rolebindings", roleName, binding); e != nil {
 		return "", e
 	}
-	obj := kube.Object{"apiVersion": "v1", "kind": "ConfigMap", "metadata": kube.Object{"name": cm, "namespace": "kube-system", "labels": kube.Object{"k0s.k0sproject.io/worker-profile": name, "app.kubernetes.io/managed-by": "k8nnect", "k8nnect.io/connection": c.Name}}, "data": copyData}
+	obj := kube.Object{"apiVersion": "v1", "kind": "ConfigMap", "metadata": kube.Object{"name": cm, "namespace": "kube-system", "labels": kube.Object{"k0s.k0sproject.io/worker-profile": name, "app.kubernetes.io/managed-by": "k0nnect", "k0nnect.io/connection": c.Name}}, "data": copyData}
 	return name, applyOwned(ctx, k, c, "/api/v1/namespaces/kube-system/configmaps", cm, obj)
 }

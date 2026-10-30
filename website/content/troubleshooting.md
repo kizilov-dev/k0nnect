@@ -1,60 +1,50 @@
-# Диагностика
+# Troubleshooting
 
-Начните с `connection-status`, логов установщика и состояния Pod. Статус Ready одной ноды недостаточен для подтверждения всей сети.
+Start with `connection-status`, installer logs, and Pod events. A Node Ready condition alone does not prove end-to-end network connectivity.
 
 ## SSH host key mismatch
 
-Убедитесь, что адрес VDS правильный, а Ed25519 fingerprint получен через доверенный канал. Не подменяйте закреплённый ключ только потому, что подключение не прошло. Текущая CLI-проверка явно предпочитает Ed25519.
+Check the server address and verify its Ed25519 fingerprint through a trusted channel. Do not replace the pinned key simply to make an error disappear.
 
-## Неподдерживаемая конфигурация CNI
+## Unsupported CNI configuration
 
-`connect-check` выводит поле `cni` с определённым драйвером, а ошибка называет конкретную настройку. Требования для Calico, Flannel, Cilium и kube-router перечислены в [матрице совместимости](compatibility.md). Установщик специально отвергает другие настройки: менять CNI всего кластера ради обхода проверки не следует.
+Compare the detected settings with the [compatibility matrix](compatibility.md). The installer rejects incompatible modes instead of changing the cluster's CNI configuration. Native routing, host-gw, transparent encryption, and external BGP layouts are not interchangeable with the validated profiles.
 
-`no supported CNI found` означает, что не найден ни один из известных DaemonSet: `calico-node`, `kube-flannel-ds`, `cilium` или `kube-router`.
-
-## Подготовка VDS завершилась с кодом 100
-
-Это код ошибки apt. На свежей VDS сразу после загрузки работают cloud-init и первый проход unattended-upgrades, а зеркала провайдера иногда отказывают в соединении. Установщик ждёт блокировку dpkg и повторяет установку пакетов пять раз. Если ошибка осталась, выполните `apt-get update` на VDS вручную и проверьте доступ к зеркалу.
-
-## Gateway Pod не Ready
+## Gateway Pod is not Ready
 
 ```sh
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system get pods -o wide
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system get events
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system \
-  logs -l app=k8nnect-gateway --tail=100 --prefix
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system get pods -o wide
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system get events
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system \
+  logs -l app=k0nnect-gateway --tail=100 --prefix
 ```
 
-Проверьте доступ к образу Ubuntu и пакетным репозиториям, поддержку WireGuard, NET_ADMIN и включённый CNI IPv4 forwarding. Наличие процесса не заменяет успешную readiness probe.
+Check image and package access, kernel WireGuard support, NET_ADMIN, and existing IPv4 forwarding. With Cilium kube-proxy replacement, the gateway must not conflict with NodePort bind protection.
 
-`RTNETLINK answers: Address already in use` при `ip link set k8ngw0 up` означает, что UDP-порт gateway занят или запрещён. Cilium с kube-proxy replacement запрещает `bind()` на порты NodePort-сервисов; установщик для такого Cilium не создаёт Service `gateway`. Если ошибка осталась, найдите другой NodePort-сервис с тем же портом или смените `port`.
+## Controller unreachable over the gateway
 
-## Недоступен controller over gateway
+Check allowed UDP traffic, recent WireGuard handshakes, and gateway access to private API and konnectivity ports. A private-only gateway requires outbound UDP and return traffic. Full NAT traversal is not provided.
 
-Проверьте UDP между VDS и gateway, свежие handshakes и доступ gateway к приватным портам API и konnectivity. Для ноды без ExternalIP нужен исходящий UDP с ответным трафиком. Полный NAT traversal не предоставляется.
+## k0s stalls after bootstrap
 
-## Pod на VDS в ContainerCreating: failed to find plugin
+k0s restricts worker-profile access to specific ConfigMap names. The installer creates an additional scoped Role/RoleBinding for its cloned profile. Check that these resources exist and that the profile has not been removed.
 
-`failed to find plugin "loopback" in path [/opt/cni/bin]` означает, что CNI не установил стандартные плагины. Установщик добавляет их сам, если их нет; на VDS, подключённой более старой версией, выполните `disconnect --drain` и повторите `connect`.
+Read `journalctl -u k0sworker`. Never attach join tokens or kubelet kubeconfigs to a public issue.
 
-## k0s остановился после bootstrap
-
-В k0s доступ к worker-профилям ограничен конкретными именами ConfigMap. Для клонированного профиля установщик создаёт отдельный Role/RoleBinding. Проверьте, что они появились и профиль не удалён.
-
-Посмотрите `journalctl -u k0sworker`. Не выводите содержимое join token или kubelet kubeconfig в публичные issue.
-
-## Нода Ready, но тесты не прошли
+## Node Ready but workload tests fail
 
 ```sh
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system get jobs,pods -o wide
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system logs job/verify-to-external
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system logs job/verify-from-external
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system get jobs,pods -o wide
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system logs job/verify-to-external
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system logs job/verify-from-external
 ```
 
-Тест печатает конкретный этап: прямой Pod TCP, Service TCP, затем размеры UDP. Разделяйте DNS/Service, MTU и базовый node transport. При ошибке ресурсы сохраняются; следующий `verify-node` их очистит.
+The probe logs direct Pod TCP, Service TCP, and each UDP size. Separate DNS/Service behavior, MTU, and basic transport failures. A missing standard CNI plugin can prevent Pod sandbox creation. kube-router may need a route-sync interval to update masquerade exemptions.
 
-Сразу после регистрации CNI может ещё не настроить новую ноду на исходных: kube-router делает это при периодической синхронизации, до 5 минут. Проверка повторяется в этом окне и сообщает `retrying`; ошибка после окна окончательная. UDP-зонд отправляет каждую датаграмму до трёх раз: первая большая датаграмма может потеряться, пока отправитель не узнает MTU пути. В логе Job это строка `UDP retry after path MTU discovery`; для kube-router это ожидаемо.
+Failed test resources remain available for diagnosis. The next `verify-node` cleans them up.
 
-## Конфликт владения или адресов
+## Legacy installation or ownership conflict
 
-Установщик не перезаписывает чужой Node, namespace, интерфейс или конфигурацию существующего k0s. Проверьте имена и наличие старой установки. Для миграции управляемого адреса сначала используйте `disconnect --drain` с учётом workloads и PDB.
+A rename is not an ownership migration. Use the old version to drain and disconnect an old-name installation before installing k0nnect; see [operations](operations.md). The new installer refuses a detected legacy managed namespace.
+
+Do not overwrite an unrelated Node, namespace, interface, or k0s installation. Use a fresh server or a controlled disconnect for address migration.

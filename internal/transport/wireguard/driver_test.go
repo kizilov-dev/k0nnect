@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"k8nnect/internal/model"
-	"k8nnect/internal/transport"
+	"k0nnect/internal/model"
+	"k0nnect/internal/transport"
 )
 
 var _ transport.Driver = (*Driver)(nil)
@@ -79,32 +79,32 @@ func (f *fakeKernel) Run(_ context.Context, program string, args []string, input
 		return nil, errors.New("injected failure")
 	}
 	switch {
-	case s == "link add dev k8n0 type wireguard":
-		l := link{Name: "k8n0", MTU: 1420}
+	case s == "link add dev k0n0 type wireguard":
+		l := link{Name: "k0n0", MTU: 1420}
 		l.Info.Kind = "wireguard"
 		f.links = []link{l}
-	case s == "link delete dev k8n0":
+	case s == "link delete dev k0n0":
 		f.links = nil
 		f.address = false
 		f.config = nil
 		var keep []route
 		for _, r := range f.routes {
-			if r.Device != "k8n0" {
+			if r.Device != "k0n0" {
 				keep = append(keep, r)
 			}
 		}
 		f.routes = keep
-	case strings.HasPrefix(s, "link set dev k8n0 alias "):
+	case strings.HasPrefix(s, "link set dev k0n0 alias "):
 		f.links[0].Alias = args[5]
-	case strings.HasPrefix(s, "link set dev k8n0 mtu "):
+	case strings.HasPrefix(s, "link set dev k0n0 mtu "):
 		if args[5] == "1400" {
 			f.links[0].MTU = 1400
 		} else {
 			f.links[0].MTU = 1420
 		}
-	case s == "link set dev k8n0 up":
+	case s == "link set dev k0n0 up":
 		f.links[0].Flags = []string{"UP"}
-	case s == "link set dev k8n0 down":
+	case s == "link set dev k0n0 down":
 		f.links[0].Flags = nil
 	case strings.HasPrefix(s, "-4 address add"):
 		f.address = true
@@ -139,7 +139,7 @@ func (f *fakeKernel) Run(_ context.Context, program string, args []string, input
 			f.routes = keep
 			break
 		}
-		r := route{Destination: dst, Protocol: json.RawMessage(`242`), Metric: 10, Device: "k8n0"}
+		r := route{Destination: dst, Protocol: json.RawMessage(`242`), Metric: 10, Device: "k0n0"}
 		if guard {
 			r.Type = "blackhole"
 			r.Device = ""
@@ -198,7 +198,7 @@ func TestPreflightRejectsForeignStateBeforeMutating(t *testing.T) {
 			d, f := fixture(t)
 			switch kind {
 			case "interface":
-				f.links = []link{{Name: "k8n0", Alias: "somebody-else"}}
+				f.links = []link{{Name: "k0n0", Alias: "somebody-else"}}
 			case "route":
 				f.routes = []route{{Destination: "10.0.0.0/8", Device: "eth0"}}
 			case "policy":
@@ -216,12 +216,12 @@ func TestPreflightRejectsForeignStateBeforeMutating(t *testing.T) {
 	}
 }
 func TestFailureRollsBackFirstInstallation(t *testing.T) {
-	for _, failure := range []string{"link set dev k8n0 alias k8nnect:v1:lab:control-plane", "wg", "-4 address add 10.203.0.1/32 dev k8n0", "-4 route add 10.203.0.2/32 dev k8n0 proto 242 metric 10", "link set dev k8n0 up"} {
+	for _, failure := range []string{"link set dev k0n0 alias k0nnect:v1:lab:control-plane", "wg", "-4 address add 10.203.0.1/32 dev k0n0", "-4 route add 10.203.0.2/32 dev k0n0 proto 242 metric 10", "link set dev k0n0 up"} {
 		t.Run(failure, func(t *testing.T) {
 			d, f := fixture(t)
 			f.fail = failure
 			if failure == "wg" {
-				f.fail = "syncconf k8n0 /dev/stdin"
+				f.fail = "syncconf k0n0 /dev/stdin"
 			}
 			if e := d.Reconcile(context.Background()); e == nil {
 				t.Fatal("failure not reported")
@@ -241,7 +241,7 @@ func TestFailedUpdateRestoresExistingTransport(t *testing.T) {
 	beforeRoutes := string(jsonBytes(f.routes))
 	beforeConfig := string(f.config)
 	d.Config.Nodes[1].Address = "10.203.0.3"
-	f.fail = "-4 route add 10.203.0.3/32 dev k8n0 proto 242 metric 10"
+	f.fail = "-4 route add 10.203.0.3/32 dev k0n0 proto 242 metric 10"
 	if e := d.Reconcile(ctx); e == nil {
 		t.Fatal("failure not reported")
 	}

@@ -1,6 +1,6 @@
 # Live external Worker enrollment — 2026-10-30
 
-An external VDS was enrolled as **k8nnect-vds** in the supplied
+An external VDS was enrolled as **k0nnect-vds** in the supplied
 cluster. The node reached Ready with InternalIP **10.203.74.100**, Kubernetes
 v1.36.4+k0s, containerd 2.3.4 and Calico 3.32.2 VXLAN. The initial scheduling taint
 was removed only after actual workload verification succeeded.
@@ -20,7 +20,7 @@ Three existing workers have Ready WireGuard gateways:
 
 The in-cluster installer Deployment successfully reconciled the connection using
 its own ServiceAccount and the supplied SSH credential in Secret vds-ssh.
-ConfigMap connection-status reported Ready. Restarting k0sworker and k8nnect-agent
+ConfigMap connection-status reported Ready. Restarting k0sworker and k0nnect-agent
 on the VDS completed with both services active and the node Ready.
 
 Initial live verification passed scheduler placement, bidirectional 65536-byte TCP,

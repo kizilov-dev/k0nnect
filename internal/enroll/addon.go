@@ -9,11 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) error {
 	if e := c.Validate(); e != nil {
+		return e
+	}
+	if e := rejectLegacyInstallation(ctx, k); e != nil {
 		return e
 	}
 	if c.K0sVersion == "" {
@@ -45,7 +48,7 @@ func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 		return fmt.Errorf("addon requires a passwordFile or privateKeyFile; SSH agent cannot be mounted into the cluster")
 	}
 	ns := "/api/v1/namespaces/" + c.Namespace
-	secret := kube.Object{"apiVersion": "v1", "kind": "Secret", "metadata": kube.Object{"name": "vds-ssh", "namespace": c.Namespace, "labels": kube.Object{"k8nnect.io/connection": c.Name}}, "type": "Opaque", "stringData": credentials}
+	secret := kube.Object{"apiVersion": "v1", "kind": "Secret", "metadata": kube.Object{"name": "vds-ssh", "namespace": c.Namespace, "labels": kube.Object{"k0nnect.io/connection": c.Name}}, "type": "Opaque", "stringData": credentials}
 	if e := applyOwned(ctx, k, c, ns+"/secrets", "vds-ssh", secret); e != nil {
 		return e
 	}
@@ -88,7 +91,7 @@ func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 		var r []any
 		if namespace == "kube-system" {
 			r = []any{
-				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{"worker-config-k8nnect-" + c.Name + "-" + minorVersion(c.K0sVersion)}, "verbs": []string{"list", "watch"}},
+				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{"worker-config-k0nnect-" + c.Name + "-" + minorVersion(c.K0sVersion)}, "verbs": []string{"list", "watch"}},
 				kube.Object{"apiGroups": []string{"rbac.authorization.k8s.io"}, "resources": []string{"roles", "rolebindings"}, "verbs": []string{"get", "create", "patch"}},
 				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "verbs": []string{"get", "create", "patch"}},
 				kube.Object{"apiGroups": []string{""}, "resources": []string{"secrets"}, "verbs": []string{"create"}},
@@ -118,9 +121,9 @@ func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 	if e != nil {
 		return e
 	}
-	labels := kube.Object{"app": "k8nnect-installer", "k8nnect.io/connection": c.Name}
-	startup := "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates && cat /payload/part* | gzip -d > /tmp/k8nnect && chmod 0700 /tmp/k8nnect && exec /tmp/k8nnect operator --config /connection/connection.json"
-	pod := kube.Object{"serviceAccountName": "installer", "affinity": kube.Object{"nodeAffinity": kube.Object{"requiredDuringSchedulingIgnoredDuringExecution": kube.Object{"nodeSelectorTerms": []any{kube.Object{"matchExpressions": []any{kube.Object{"key": "k8nnect.io/external", "operator": "NotIn", "values": []string{"true"}}}}}}}}, "containers": []any{kube.Object{"name": "installer", "image": "ubuntu:24.04", "command": []string{"bash", "-ec", startup}, "securityContext": kube.Object{"allowPrivilegeEscalation": false}, "resources": kube.Object{"requests": kube.Object{"cpu": "25m", "memory": "32Mi"}, "limits": kube.Object{"memory": "256Mi"}}, "volumeMounts": []any{kube.Object{"name": "payload", "mountPath": "/payload", "readOnly": true}, kube.Object{"name": "connection", "mountPath": "/connection", "readOnly": true}, kube.Object{"name": "credentials", "mountPath": "/credentials", "readOnly": true}}}}, "volumes": []any{kube.Object{"name": "payload", "projected": kube.Object{"sources": sources}}, kube.Object{"name": "connection", "configMap": kube.Object{"name": "connection"}}, kube.Object{"name": "credentials", "secret": kube.Object{"secretName": "vds-ssh", "defaultMode": 256}}}}
+	labels := kube.Object{"app": "k0nnect-installer", "k0nnect.io/connection": c.Name}
+	startup := "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates && cat /payload/part* | gzip -d > /tmp/k0nnect && chmod 0700 /tmp/k0nnect && exec /tmp/k0nnect operator --config /connection/connection.json"
+	pod := kube.Object{"serviceAccountName": "installer", "affinity": kube.Object{"nodeAffinity": kube.Object{"requiredDuringSchedulingIgnoredDuringExecution": kube.Object{"nodeSelectorTerms": []any{kube.Object{"matchExpressions": []any{kube.Object{"key": "k0nnect.io/external", "operator": "NotIn", "values": []string{"true"}}}}}}}}, "containers": []any{kube.Object{"name": "installer", "image": "ubuntu:24.04", "command": []string{"bash", "-ec", startup}, "securityContext": kube.Object{"allowPrivilegeEscalation": false}, "resources": kube.Object{"requests": kube.Object{"cpu": "25m", "memory": "32Mi"}, "limits": kube.Object{"memory": "256Mi"}}, "volumeMounts": []any{kube.Object{"name": "payload", "mountPath": "/payload", "readOnly": true}, kube.Object{"name": "connection", "mountPath": "/connection", "readOnly": true}, kube.Object{"name": "credentials", "mountPath": "/credentials", "readOnly": true}}}}, "volumes": []any{kube.Object{"name": "payload", "projected": kube.Object{"sources": sources}}, kube.Object{"name": "connection", "configMap": kube.Object{"name": "connection"}}, kube.Object{"name": "credentials", "secret": kube.Object{"secretName": "vds-ssh", "defaultMode": 256}}}}
 	deployment := kube.Object{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": kube.Object{"name": "installer", "namespace": c.Namespace}, "spec": kube.Object{"replicas": 1, "strategy": kube.Object{"type": "Recreate"}, "selector": kube.Object{"matchLabels": labels}, "template": kube.Object{"metadata": kube.Object{"labels": labels}, "spec": pod}}}
 	if e = applyOwned(ctx, k, c, "/apis/apps/v1/namespaces/"+c.Namespace+"/deployments", "installer", deployment); e != nil {
 		return e

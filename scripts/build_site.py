@@ -9,15 +9,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGES = [
-    ('index', 'Обзор', 'Начать'),
-    ('getting-started', 'Быстрый старт', 'Начать'),
-    ('configuration', 'Конфигурация', 'Начать'),
-    ('compatibility', 'Совместимость', 'Устройство'),
-    ('architecture', 'Архитектура', 'Устройство'),
-    ('security', 'Права и секреты', 'Устройство'),
-    ('operations', 'Эксплуатация', 'Работа с утилитой'),
-    ('verification', 'Проверки и результаты', 'Работа с утилитой'),
-    ('troubleshooting', 'Диагностика', 'Работа с утилитой'),
+    ('index', 'Overview', 'Getting started'),
+    ('getting-started', 'Quick start', 'Getting started'),
+    ('configuration', 'Configuration', 'Getting started'),
+    ('compatibility', 'Compatibility', 'How it works'),
+    ('architecture', 'Architecture', 'How it works'),
+    ('security', 'Permissions and secrets', 'How it works'),
+    ('operations', 'Operations', 'Using k0nnect'),
+    ('verification', 'Tests and results', 'Using k0nnect'),
+    ('troubleshooting', 'Troubleshooting', 'Using k0nnect'),
 ]
 
 
@@ -132,11 +132,11 @@ def build(destination, repo):
         raise ValueError('Output must be a separate directory inside the project')
     if destination.exists():
         # Only our generated output may be replaced.
-        if not (destination / '.k8nnect-generated').exists():
+        if not any((destination / marker).exists() for marker in ('.k0nnect-generated', '.k8nnect-generated')):
             raise ValueError('Refusing to replace an unowned output directory')
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
-    (destination / '.k8nnect-generated').touch()
+    (destination / '.k0nnect-generated').touch()
     (destination / '.nojekyll').touch()
     shutil.copytree(ROOT / 'website/assets', destination / 'assets')
     landing = (ROOT / 'website/index.html').read_text().replace('{{repo}}', html.escape(repo, quote=True))
@@ -166,18 +166,18 @@ def build(destination, repo):
             key, label, _ = PAGES[index+1]
             url = page_url(key) if name != 'index' else key + '/'
             pagination += '<a href="' + url + '">' + label + ' →</a>'
-        page = f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} — k8nnect</title><meta name="description" content="{title}: руководство k8nnect для подключения внешней VDS к Kubernetes."><meta name="theme-color" content="#126b56"><link rel="icon" href="{prefix}assets/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="{prefix}assets/style.css"><script defer src="{prefix}assets/app.js"></script></head><body>
-<a class="skip" href="#main">Перейти к содержимому</a><header class="header"><div class="wrap"><a class="brand" href="{prefix}" aria-label="k8nnect — главная"><img src="{prefix}assets/logo.svg" width="34" height="34" alt="">k8nnect</a><nav class="nav" aria-label="Главное меню"><a href="{prefix}docs/">Документация</a><a href="{repo}">GitHub ↗</a><span class="pill">Experimental</span></nav></div></header>
-<div class="wrap docs-shell"><button class="docs-menu" aria-expanded="false" aria-controls="docs-sidebar">Разделы документации ↓</button><aside class="sidebar" id="docs-sidebar" aria-label="Разделы документации"><label class="sr-only" for="doc-search">Найти раздел</label><input class="doc-search" id="doc-search" type="search" placeholder="Найти раздел…"><nav>{''.join(nav)}</nav><p class="search-empty" hidden>Раздел не найден</p></aside><main class="doc-article" id="main"><div class="eyebrow">k8nnect / documentation</div>{article}<nav class="doc-end" aria-label="Соседние страницы">{pagination}</nav></main><aside class="toc" aria-label="На этой странице"><strong>На этой странице</strong>{contents}</aside></div><footer class="footer"><div class="wrap"><span>k8nnect · Experimental · k0s</span><div><a href="{repo}">Исходный код ↗</a><a href="{repo}/blob/main/website/content/{name}.md">Изменить страницу ↗</a></div></div></footer></body></html>'''
+        page = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} — k0nnect</title><meta name="description" content="{title}: k0nnect guide to enrolling external servers into Kubernetes."><meta name="theme-color" content="#126b56"><link rel="icon" href="{prefix}assets/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="{prefix}assets/style.css"><script defer src="{prefix}assets/app.js"></script></head><body>
+<a class="skip" href="#main">Skip to content</a><header class="header"><div class="wrap"><a class="brand" href="{prefix}" aria-label="k0nnect home"><img src="{prefix}assets/logo.svg" width="34" height="34" alt="">k0nnect</a><button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav">Menu <span aria-hidden="true">☰</span></button><nav class="nav" id="site-nav" aria-label="Main navigation"><a href="{prefix}docs/">Documentation</a><a href="{repo}">GitHub ↗</a><span class="pill">Experimental</span></nav></div></header>
+<div class="wrap docs-shell"><button class="docs-menu" aria-expanded="false" aria-controls="docs-sidebar">Browse documentation ↓</button><aside class="sidebar" id="docs-sidebar" aria-label="Documentation navigation"><label class="sr-only" for="doc-search">Find a section</label><input class="doc-search" id="doc-search" type="search" placeholder="Find a section…"><nav>{''.join(nav)}</nav><p class="search-empty" hidden>No matching sections</p></aside><main class="doc-article" id="main"><div class="eyebrow">k0nnect / documentation</div>{article}<nav class="doc-end" aria-label="Previous and next pages">{pagination}</nav></main><aside class="toc" aria-label="On this page"><strong>On this page</strong>{contents}</aside></div><footer class="footer"><div class="wrap"><span>k0nnect · Experimental · k0s</span><div><a href="{repo}">Source code ↗</a><a href="{repo}/blob/main/website/content/{name}.md">Edit this page ↗</a></div></div></footer></body></html>'''
         (target / 'index.html').write_text(page)
-    (destination / '404.html').write_text('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Страница не найдена — k8nnect</title><body style="font:18px/1.7 system-ui;max-width:600px;margin:12vh auto;padding:24px"><h1>Страница не найдена</h1><p>Возможно, адрес документации изменился.</p><a href="' + repo + '">Открыть репозиторий k8nnect →</a></body></html>')
+    (destination / '404.html').write_text('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Page not found — k0nnect</title><body style="font:18px/1.7 system-ui;max-width:600px;margin:12vh auto;padding:24px"><h1>Page not found</h1><p>This documentation page may have moved.</p><a href="' + repo + '">Open the k0nnect repository →</a></body></html>')
     print(f'Built {len(PAGES)+2} pages in {destination}')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', default='site')
-    parser.add_argument('--repo', default='https://github.com/kizilov-dev/k8nnect')
+    parser.add_argument('--repo', default='https://github.com/kizilov-dev/k0nnect')
     args = parser.parse_args()
     if not re.fullmatch(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repo):
         parser.error('--repo must be a GitHub repository URL')

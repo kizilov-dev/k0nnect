@@ -9,15 +9,15 @@ test; include the control-plane node in the transport inventory too.
 
 Install kernel WireGuard, wireguard-tools, iproute2 and iputils ping using your
 distribution's package manager. Build the binary with `make build`, then install
-it at `/usr/local/bin/k8nnect` on every participating VM.
+it at `/usr/local/bin/k0nnect` on every participating VM.
 
 Generate a distinct key on each node as root; never copy a private key into the
 inventory or source repository:
 
 ```sh
-sudo install -d -m 0700 /etc/k8nnect
-sudo sh -c 'umask 077; wg genkey > /etc/k8nnect/node.key'
-sudo sh -c 'wg pubkey < /etc/k8nnect/node.key'
+sudo install -d -m 0700 /etc/k0nnect
+sudo sh -c 'umask 077; wg genkey > /etc/k0nnect/node.key'
+sudo sh -c 'wg pubkey < /etc/k0nnect/node.key'
 ```
 
 Copy `examples/inventory.json` and replace the placeholder endpoint addresses,
@@ -32,7 +32,7 @@ networks and policy routing as well. The preflight intentionally rejects existin
 non-default routes overlapping the transport CIDR, including broad VPN routes.
 Endpoints must be literal IPv4 addresses with a reachable UDP port; the listening
 port and externally advertised port must match in this first profile. Configure
-firewalls explicitly; k8nnect does not open ports or implement relay/rendezvous.
+firewalls explicitly; k0nnect does not open ports or implement relay/rendezvous.
 
 Set `pathMTU` to a conservative known lower bound for the real underlay. For
 IPv4 WireGuard, transport MTU must not exceed path MTU minus 60. The example uses
@@ -40,9 +40,9 @@ IPv4 WireGuard, transport MTU must not exceed path MTU minus 60. The example use
 discovery result or safe defaults for every provider path.
 
 ```sh
-k8nnect plan --config /etc/k8nnect/inventory.json --node remote-worker
-sudo k8nnect doctor --config /etc/k8nnect/inventory.json --node remote-worker
-sudo k8nnect apply --config /etc/k8nnect/inventory.json --node remote-worker
+k0nnect plan --config /etc/k0nnect/inventory.json --node remote-worker
+sudo k0nnect doctor --config /etc/k0nnect/inventory.json --node remote-worker
+sudo k0nnect apply --config /etc/k0nnect/inventory.json --node remote-worker
 ```
 
 Repeat with the correct node name on all nodes, then run `verify` on each node.
@@ -67,7 +67,7 @@ For an existing cluster, review endpoint/certificate, Node IP, Flannel and MTU
 migration independently. Do not simply replace Node IPs using this runbook.
 
 Review the Flannel installation manifest for your chosen release. Set
-`flanneld --iface=k8n0` (or the inventory interface) on every node and backend
+`flanneld --iface=k0n0` (or the inventory interface) on every node and backend
 `Type: vxlan`, `DirectRouting: false`. Flannel derives the VXLAN MTU from the
 selected interface; verify the effective value in `/run/flannel/subnet.env`
 and inside a newly created Pod. Confirm Flannel's node endpoint annotation uses
@@ -79,7 +79,7 @@ against the inventory. The file check rejects an incorrect Pod CIDR, IPv6,
 non-VXLAN backend, DirectRouting and non-default VXLAN ports. The agent repeats
 this optional check each cycle. Runtime interface selection still needs the
 checks above. Confirm IPv4 forwarding is enabled for Pod traffic using the
-requirements of your Kubernetes/CNI installation; k8nnect does not change sysctls.
+requirements of your Kubernetes/CNI installation; k0nnect does not change sysctls.
 
 Allow the API, kubelet and Flannel VXLAN traffic on the encrypted interface using
 the firewall policy of the cluster. Keep the public underlay restricted to the
@@ -92,13 +92,13 @@ store it in an owner-only token file on the new worker. Obtain the CA public-key
 hash through a trusted channel. Neither credential belongs in the inventory.
 
 ```sh
-sudo k8nnect join-config \
-  --config /etc/k8nnect/inventory.json --node remote-worker \
-  --token-file /etc/k8nnect/bootstrap.token \
+sudo k0nnect join-config \
+  --config /etc/k0nnect/inventory.json --node remote-worker \
+  --token-file /etc/k0nnect/bootstrap.token \
   --ca-hash sha256:REPLACE_WITH_64_HEX_DIGITS \
-  --output /etc/k8nnect/join.json
+  --output /etc/k0nnect/join.json
 
-sudo kubeadm join --config /etc/k8nnect/join.json
+sudo kubeadm join --config /etc/k0nnect/join.json
 ```
 
 `join-config` writes JSON (also accepted as YAML by kubeadm), pins the discovery
@@ -116,17 +116,17 @@ the cluster or change node settings.
 ## Start at boot
 
 Install the supplied units and kubelet drop-in under `/etc/systemd/system`.
-Write `/etc/k8nnect/node.env` containing `K8NNECT_NODE=remote-worker` (use the
+Write `/etc/k0nnect/node.env` containing `K0NNECT_NODE=remote-worker` (use the
 corresponding inventory name on each host). Then reload systemd and enable
-`k8nnect-agent.service`. It requires `k8nnect-ready.service`, which applies local
+`k0nnect-agent.service`. It requires `k0nnect-ready.service`, which applies local
 transport before kubelet. The ready unit asserts local configuration only.
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now k8nnect-agent.service
+sudo systemctl enable --now k0nnect-agent.service
 ```
 
-Inspect `journalctl -u k8nnect-agent.service` and `k8nnect status`. Agent errors are
+Inspect `journalctl -u k0nnect-agent.service` and `k0nnect status`. Agent errors are
 retried and logged; service activity does not assert peer or workload readiness.
 The agent reloads peer changes every interval. Change inventory files atomically
 and distribute revocations to all affected nodes. Identity/address/interface/MTU
@@ -144,9 +144,9 @@ For removal, first drain workloads through the Kubernetes administrator's normal
 process, stop the agent and stop the local kubelet. Then:
 
 ```sh
-sudo systemctl disable --now k8nnect-agent.service
+sudo systemctl disable --now k0nnect-agent.service
 sudo systemctl stop kubelet.service
-sudo k8nnect remove --config /etc/k8nnect/inventory.json --node remote-worker --drained
+sudo k0nnect remove --config /etc/k0nnect/inventory.json --node remote-worker --drained
 ```
 
 Remove the node's systemd units/drop-in before restarting kubelet or rebooting,

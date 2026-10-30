@@ -2,9 +2,9 @@ GO ?= go
 
 .PHONY: build plugin test check integration
 build:
-	CGO_ENABLED=0 $(GO) build -buildvcs=false -trimpath -o bin/k8nnect ./cmd/k8nnect
+	CGO_ENABLED=0 $(GO) build -buildvcs=false -trimpath -o bin/k0nnect ./cmd/k0nnect
 plugin: build
-	ln -sf k8nnect bin/kubectl-k8nnect
+	ln -sf k0nnect bin/kubectl-k0nnect
 test:
 	$(GO) test -race ./...
 check:

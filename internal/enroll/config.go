@@ -48,7 +48,7 @@ func Load(path string) (Config, error) {
 }
 func (c *Config) Validate() error {
 	if c.Namespace == "" {
-		c.Namespace = "k8nnect-system"
+		c.Namespace = "k0nnect-system"
 	}
 	if c.User == "" {
 		c.User = "root"

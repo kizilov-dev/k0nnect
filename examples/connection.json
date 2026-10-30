@@ -1,7 +1,7 @@
 {
   "name": "external-worker",
-  "nodeName": "k8nnect-vds",
-  "namespace": "k8nnect-system",
+  "nodeName": "k0nnect-vds",
+  "namespace": "k0nnect-system",
   "host": "203.0.113.10",
   "user": "root",
   "sshPort": 22,

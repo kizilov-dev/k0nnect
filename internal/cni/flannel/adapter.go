@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"k8nnect/internal/model"
+	"k0nnect/internal/model"
 )
 
 type Adapter struct{}

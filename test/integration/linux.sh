@@ -9,11 +9,11 @@ for tool in ip wg ping python3; do
   command -v "$tool" >/dev/null || { echo "SKIP: missing $tool" >&2; exit 77; }
 done
 task_root=$(cd "$(dirname "$0")/../.." && pwd)
-task_bin="$task_root/bin/k8nnect"
+task_bin="$task_root/bin/k0nnect"
 [[ -x "$task_bin" ]] || { echo 'Run make build first' >&2; exit 1; }
 task_dir=$(mktemp -d)
-task_ns_a="k8n-a-$$"
-task_ns_b="k8n-b-$$"
+task_ns_a="k0n-a-$$"
+task_ns_b="k0n-b-$$"
 task_created_a=false
 task_created_b=false
 cleanup() {
@@ -62,16 +62,16 @@ invoke "$task_ns_b" remote-worker apply
 invoke "$task_ns_a" control-plane verify
 invoke "$task_ns_b" remote-worker verify
 invoke "$task_ns_a" control-plane apply
-[[ $(ip -n "$task_ns_a" -4 route show dev k8n0 | wc -l) == 1 ]]
+[[ $(ip -n "$task_ns_a" -4 route show dev k0n0 | wc -l) == 1 ]]
 # Restart reconciliation after loss of interface admin state.
-ip -n "$task_ns_a" link set k8n0 down
+ip -n "$task_ns_a" link set k0n0 down
 invoke "$task_ns_a" control-plane apply
 invoke "$task_ns_a" control-plane verify
 # A foreign interface must survive a rejected apply/remove.
 invoke "$task_ns_a" control-plane remove --drained
-ip -n "$task_ns_a" link add k8n0 type dummy
+ip -n "$task_ns_a" link add k0n0 type dummy
 if invoke "$task_ns_a" control-plane apply; then echo 'Foreign interface accepted' >&2; exit 1; fi
 if invoke "$task_ns_a" control-plane remove --drained; then echo 'Foreign interface removed' >&2; exit 1; fi
-ip -n "$task_ns_a" link show k8n0 >/dev/null
+ip -n "$task_ns_a" link show k0n0 >/dev/null
 invoke "$task_ns_b" remote-worker remove --drained
 echo 'PASS: encrypted link, MTU, repeat apply, recovery, removal and foreign ownership'

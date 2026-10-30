@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 func pause(ctx context.Context, d time.Duration) error {
@@ -59,7 +59,7 @@ func discover(ctx context.Context, k *kube.Client, c *Config) ([]Peer, kube.Obje
 		meta := kube.Map(n, "metadata")
 		labels := kube.Map(meta, "labels")
 		name := kube.Str(meta, "name")
-		if name == c.NodeName || kube.Str(labels, "k8nnect.io/external") == "true" || !nodesReady(n) {
+		if name == c.NodeName || kube.Str(labels, "k0nnect.io/external") == "true" || !nodesReady(n) {
 			continue
 		}
 		info := kube.Map(kube.Map(n, "status"), "nodeInfo")
@@ -88,7 +88,7 @@ func discover(ctx context.Context, k *kube.Client, c *Config) ([]Peer, kube.Obje
 		if external != "" {
 			endpoint = fmt.Sprintf("%s:%d", external, c.Port)
 		}
-		peers = append(peers, Peer{Name: name, InternalIP: internal, Endpoint: endpoint, PublicKey: kube.Str(kube.Map(meta, "annotations"), "k8nnect.io/wireguard-public-key")})
+		peers = append(peers, Peer{Name: name, InternalIP: internal, Endpoint: endpoint, PublicKey: kube.Str(kube.Map(meta, "annotations"), "k0nnect.io/wireguard-public-key")})
 	}
 	if len(peers) == 0 || len(peers) > 99 {
 		return nil, nil, "", fmt.Errorf("need 1..99 ready gateway workers")
@@ -139,6 +139,9 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 	if e := c.Validate(); e != nil {
 		return e
 	}
+	if e := rejectLegacyInstallation(ctx, k); e != nil {
+		return e
+	}
 	log := func(s string) { fmt.Fprintln(out, s) }
 	log("Discovering k0s and CNI compatibility")
 	peers, source, minor, e := discover(ctx, k, &c)
@@ -147,7 +150,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 	}
 	log("Detected CNI: " + c.CNI)
 	if existing, err := k.Get(ctx, "/api/v1/nodes/"+c.NodeName); err == nil {
-		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "labels"), "k8nnect.io/connection") != c.Name {
+		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "labels"), "k0nnect.io/connection") != c.Name {
 			return fmt.Errorf("refusing an existing node not owned by this connection")
 		}
 		if ip := address(existing, "InternalIP"); ip != "" && ip != c.WorkerAddress {
@@ -173,10 +176,10 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 	if e != nil {
 		return e
 	}
-	if e = r.Put(ctx, "/usr/local/bin/k8nnect", binary, "0700"); e != nil {
+	if e = r.Put(ctx, "/usr/local/bin/k0nnect", binary, "0700"); e != nil {
 		return e
 	}
-	pub, e := r.Run(ctx, "wg pubkey < /etc/k8nnect/worker.key", nil)
+	pub, e := r.Run(ctx, "wg pubkey < /etc/k0nnect/worker.key", nil)
 	if e != nil {
 		return e
 	}
@@ -199,7 +202,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 	for {
 		ready := true
 		nodeMTU = 0
-		pods, e := k.Get(ctx, "/api/v1/namespaces/"+c.Namespace+"/pods?labelSelector=app%3Dk8nnect-gateway")
+		pods, e := k.Get(ctx, "/api/v1/namespaces/"+c.Namespace+"/pods?labelSelector=app%3Dk0nnect-gateway")
 		if e != nil {
 			return e
 		}
@@ -219,7 +222,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 				return e
 			}
 			annotations := kube.Map(kube.Map(n, "metadata"), "annotations")
-			peers[i].PublicKey = kube.Str(annotations, "k8nnect.io/wireguard-public-key")
+			peers[i].PublicKey = kube.Str(annotations, "k0nnect.io/wireguard-public-key")
 			mtu, err := strconv.Atoi(kube.Str(annotations, NodeMTUAnnotation))
 			if peers[i].PublicKey == "" || err != nil || !readyNodes[peers[i].Name] {
 				ready = false
@@ -245,7 +248,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 	if e != nil {
 		return e
 	}
-	if e = r.Put(ctx, "/etc/k8nnect/worker.json", data, "0600"); e != nil {
+	if e = r.Put(ctx, "/etc/k0nnect/worker.json", data, "0600"); e != nil {
 		return e
 	}
 	log("Starting isolated Worker network and checking controller reachability")
@@ -258,7 +261,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 	}
 	// Reachability is checked inside the exact namespace used by kubelet/containerd.
 	host := strings.Split(controllerAddresses[0], ":")[0]
-	probe := fmt.Sprintf("ip netns exec k8nnect python3 -c %s", Quote(fmt.Sprintf("import socket; socket.create_connection((%q,6443),10).close(); socket.create_connection((%q,8132),10).close(); print('controller paths reachable')", host, host)))
+	probe := fmt.Sprintf("ip netns exec k0nnect python3 -c %s", Quote(fmt.Sprintf("import socket; socket.create_connection((%q,6443),10).close(); socket.create_connection((%q,8132),10).close(); print('controller paths reachable')", host, host)))
 	if _, e = r.Run(ctx, probe, nil); e != nil {
 		return fmt.Errorf("controller reachability over gateway failed: %w", e)
 	}
@@ -271,7 +274,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 	}
 	if e == nil && nodesReady(existing) && strings.TrimSpace(string(service)) == "active" {
 		log("Worker is already Ready; network reconciled")
-		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "annotations"), "k8nnect.io/verified") == "" {
+		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "annotations"), "k0nnect.io/verified") == "" {
 			return VerifyNode(ctx, k, c, out)
 		}
 		return nil
@@ -295,7 +298,7 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 		}
 	}()
 	// Only a scoped, expiring bootstrap token is transferred; never administrator credentials.
-	if e = r.Put(ctx, "/etc/k8nnect/join.token", []byte(token+"\n"), "0600"); e != nil {
+	if e = r.Put(ctx, "/etc/k0nnect/join.token", []byte(token+"\n"), "0600"); e != nil {
 		return e
 	}
 	log("Installing verified k0s release and registering Worker")
@@ -382,7 +385,7 @@ func approveServing(ctx context.Context, k *kube.Client, c Config) error {
 			}
 		}
 		name := kube.Str(kube.Map(csr, "metadata"), "name")
-		csr["status"] = kube.Object{"conditions": []any{kube.Object{"type": "Approved", "status": "True", "reason": "K8nnectValidatedNode", "message": "Validated external node identity and SANs", "lastUpdateTime": time.Now().UTC().Format(time.RFC3339)}}}
+		csr["status"] = kube.Object{"conditions": []any{kube.Object{"type": "Approved", "status": "True", "reason": "K0nnectValidatedNode", "message": "Validated external node identity and SANs", "lastUpdateTime": time.Now().UTC().Format(time.RFC3339)}}}
 		if _, e = k.Do(ctx, "PUT", "/apis/certificates.k8s.io/v1/certificatesigningrequests/"+url.PathEscape(name)+"/approval", csr); e != nil {
 			return e
 		}

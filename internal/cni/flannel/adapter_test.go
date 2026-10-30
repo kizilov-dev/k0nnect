@@ -1,7 +1,7 @@
 package flannel
 
 import (
-	"k8nnect/internal/model"
+	"k0nnect/internal/model"
 	"strings"
 	"testing"
 )

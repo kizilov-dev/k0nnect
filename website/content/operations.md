@@ -1,62 +1,68 @@
-# Эксплуатация
+# Operations
 
-CLI принимает `--config` и `--kubeconfig`. В примерах ниже kubeconfig и connection JSON находятся в локальном каталоге `/secure`.
+Commands take `--config` and `--kubeconfig`. Examples below use a private local directory named `/secure`.
 
-## Смотреть состояние
+## Check connection status
 
 ```sh
-kubectl --kubeconfig /secure/cluster.yaml get node k8nnect-vds -o wide
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system get pods -o wide
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system \
+kubectl --kubeconfig /secure/cluster.yaml get node k0nnect-vds -o wide
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system get pods -o wide
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system \
   get configmap connection-status -o yaml
 ```
 
-ConfigMap содержит `phase`, имя ноды, время и краткое описание. `Connecting` означает выполняющуюся сверку, `Ready` — успешное завершение цикла, `Error` — необходимость диагностики.
+The status ConfigMap contains `phase`, node name, timestamp, and details. `Connecting` means a reconciliation cycle is running; `Ready` means it completed successfully; `Error` needs diagnosis.
 
-## Смотреть логи
+## Read logs
 
 ```sh
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system \
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system \
   logs deployment/installer --tail=100
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system \
-  logs -l app=k8nnect-gateway --tail=50 --prefix
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system \
+  logs -l app=k0nnect-gateway --tail=50 --prefix
 ```
 
-На VDS:
+On the server:
 
 ```sh
-systemctl status k8nnect-network k8nnect-agent k0sworker
-journalctl -u k0sworker -u k8nnect-agent --since '10 minutes ago'
+systemctl status k0nnect-network k0nnect-agent k0sworker
+journalctl -u k0sworker -u k0nnect-agent --since '10 minutes ago'
 ```
 
-Не публикуйте bootstrap-файлы, kubeconfig, приватные ключи или необезличенные снимки конфигурации. `wg show` скрывает private key; `wg show all dump` может раскрыть его.
+Do not publish bootstrap files, kubeconfigs, private keys, or raw configuration snapshots. Ordinary `wg show` hides the private key; dump output may expose it.
 
-## Повторить workload-проверки
+## Repeat workload verification
 
 ```sh
-k8nnect verify-node \
+k0nnect verify-node \
   --kubeconfig /secure/cluster.yaml \
   --config /secure/connection.json
 ```
 
-Проверка создаёт собственные временные Pod, Services и Jobs. Она тестирует новую ноду с каждым существующим Ready Worker и удаляет ресурсы после успеха. Пока CNI может ещё настраивать новую ноду (для kube-router — до `--routes-sync-period` плюс минута, для остальных — минута), неудачная попытка повторяется. При окончательной ошибке тестовые ресурсы остаются для диагностики; следующий прогон их очищает.
+This creates owned temporary Pods, Services, and Jobs and checks the external node against every original Ready worker. Successful tests clean up their resources. Failed resources remain for diagnosis and are removed on the next verification run.
 
-Повторный `connect` или reconcile аддона поддерживает уже управляемую сеть. Рабочая проверенная нода повторно не присоединяется. Если `k0sworker` на VDS остановлен, нода регистрируется и проверяется заново, даже когда API ещё показывает её Ready.
+Repeated `connect` or addon reconciliation maintains an owned network. A running Ready worker with a verification annotation is not enrolled again.
 
-## Отключить Worker
+## Disconnect a worker
 
 ```sh
-k8nnect disconnect --drain \
+k0nnect disconnect --drain \
   --kubeconfig /secure/cluster.yaml \
   --config /secure/connection.json
 ```
 
-Команда останавливает установщик, cordon/drain новой ноды с учётом PodDisruptionBudget, останавливает принадлежащие ей сервисы и удаляет собственную сеть, Node и кластерные ресурсы соединения.
+The command stops the installer, cordons and drains the external node while respecting PodDisruptionBudgets, stops its managed services and runtime shims, removes node-local CNI state, and removes owned network and cluster resources.
 
-На VDS также завершаются оставшиеся containerd-shim k0s и удаляется локальное состояние CNI этой ноды: `/etc/cni/net.d`, `/var/lib/cni`, `/run/flannel`, состояние Calico, Cilium (включая BPF-пины) и kube-router. При повторном подключении нода получает новую Pod CIDR, и устаревшее состояние помешало бы создавать Pod. DaemonSet CNI заново создаст всё нужное.
+Installed packages, k0s data, and recovery keys remain. It does not perform a general `k0s reset`. Removal and re-enrollment passed the four-CNI lab matrix; production workload behavior still depends on PDBs, storage, and application design.
 
-Пакеты, данные k0s и ключи восстановления на VDS сохраняются. Полный `k0s reset` не выполняется. Цикл `disconnect --drain` → `connect` проверен на всех четырёх поддержанных CNI.
+## Upgrade an existing k0nnect installation
 
-## Обновление и ограничения
+Build the new release, then repeat `addon-install` to update the installer. Changing the transport address of an enrolled worker requires an explicit disconnect. Automatic Kubernetes upgrades and primary-gateway failover are not implemented.
 
-После сборки новой версии повторный `addon-install` обновляет установщик. Менять транспортный адрес уже подключённой ноды без явного отключения нельзя. Первичная реализация не предоставляет автоматического обновления Kubernetes и failover основного gateway.
+## Move from the previous project name
+
+The rename changes ownership labels, systemd units, filesystem paths, and network namespace names. It is not an in-place replacement for a running installation under the old name.
+
+Keep the old binary and connection file. First drain and disconnect using that version. Confirm the old gateway and worker services are removed. Then update the node name and namespace in your connection file to the new examples and run `k0nnect connect-check` followed by `connect` or `addon-install`.
+
+The new installer refuses to connect while it detects a legacy managed namespace. This avoids creating two competing gateway networks. The rebranding does not automatically modify your live cluster or server.

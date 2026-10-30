@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 type roundTrip func(*http.Request) (*http.Response, error)
@@ -33,7 +33,7 @@ func response(code int, body kube.Object) *http.Response {
 	return &http.Response{StatusCode: code, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(b))}
 }
 func fixtureConfig() Config {
-	return Config{Name: "test-vds", NodeName: "external-node", Namespace: "k8nnect-system", Host: "198.51.100.2", HostKeySHA256: "SHA256:012345678901234567890123456789012345678901234", TransportCIDR: "10.203.74.0/24", WorkerAddress: "10.203.74.100", Port: 31820, MTU: 1400, K0sVersion: "v1.36.4+k0s.0"}
+	return Config{Name: "test-vds", NodeName: "external-node", Namespace: "k0nnect-system", Host: "198.51.100.2", HostKeySHA256: "SHA256:012345678901234567890123456789012345678901234", TransportCIDR: "10.203.74.0/24", WorkerAddress: "10.203.74.100", Port: 31820, MTU: 1400, K0sVersion: "v1.36.4+k0s.0"}
 }
 func TestPreviewNeverForwardsMutationsAndRedactsCredentials(t *testing.T) {
 	c := fixtureConfig()
@@ -101,7 +101,7 @@ func TestOwnedApplyRefusesForeignResources(t *testing.T) {
 		if r.Method != "GET" {
 			mutations++
 		}
-		return response(200, kube.Object{"metadata": kube.Object{"labels": kube.Object{"k8nnect.io/connection": "someone-else"}}}), nil
+		return response(200, kube.Object{"metadata": kube.Object{"labels": kube.Object{"k0nnect.io/connection": "someone-else"}}}), nil
 	})}}
 	e := applyOwned(context.Background(), k, fixtureConfig(), "/api/v1/configmaps", "existing", kube.Object{"metadata": kube.Object{"name": "existing"}})
 	if e == nil || mutations != 0 {
@@ -142,7 +142,7 @@ func TestTokenHasBoundedExpiryAndWorkerOnlyUsage(t *testing.T) {
 func TestGeneratedScriptsParseAndPreserveData(t *testing.T) {
 	c := fixtureConfig()
 	c.ClusterID = "test-cluster"
-	for name, script := range map[string]string{"prepare": prepareScript(c), "network": networkUnitsScript(), "install": installScript(c, "k8nnect-test-vds"), "stop": stopWorkerScript(c)} {
+	for name, script := range map[string]string{"prepare": prepareScript(c), "network": networkUnitsScript(), "install": installScript(c, "k0nnect-test-vds"), "stop": stopWorkerScript(c)} {
 		t.Run(name, func(t *testing.T) {
 			cmd := exec.Command("bash", "-n")
 			cmd.Stdin = strings.NewReader(script)
@@ -154,7 +154,7 @@ func TestGeneratedScriptsParseAndPreserveData(t *testing.T) {
 			}
 		})
 	}
-	if !strings.Contains(installScript(c, "profile"), "NetworkNamespacePath=/run/netns/k8nnect") {
+	if !strings.Contains(installScript(c, "profile"), "NetworkNamespacePath=/run/netns/k0nnect") {
 		t.Fatal("Worker service is not isolated")
 	}
 	if !strings.Contains(installScript(c, "profile"), cniPluginsSHA256+"  cni-plugins.tgz") {
@@ -251,7 +251,7 @@ func TestWorkerProfileGrantIsBoundedToNewIdentityAndConfigMap(t *testing.T) {
 		if kube.Str(r.Object, "kind") == "Role" {
 			rule := kube.As(kube.Items(r.Object, "rules")[0])
 			names := kube.Items(rule, "resourceNames")
-			if len(names) != 1 || names[0] != "worker-config-k8nnect-test-vds-1.36" {
+			if len(names) != 1 || names[0] != "worker-config-k0nnect-test-vds-1.36" {
 				t.Fatalf("broad profile grant: %v", names)
 			}
 			found = true
@@ -265,5 +265,30 @@ func TestWorkerProfileGrantIsBoundedToNewIdentityAndConfigMap(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no bounded profile RBAC created")
+	}
+}
+
+func TestRenameRefusesLegacyInstallationBeforeMutations(t *testing.T) {
+	for _, operation := range []string{"connect", "addon"} {
+		t.Run(operation, func(t *testing.T) {
+			k := &kube.Client{Server: "https://example.test", HTTP: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+				if r.Method != "GET" {
+					t.Fatalf("rename made a mutation: %s", r.Method)
+				}
+				if r.URL.Path != "/api/v1/namespaces" || r.URL.Query().Get("labelSelector") != "app.kubernetes.io/managed-by=k8nnect" {
+					t.Fatalf("unexpected preflight: %s", r.URL)
+				}
+				return response(200, kube.Object{"items": []any{kube.Object{"metadata": kube.Object{"name": "legacy-system"}}}}), nil
+			})}}
+			var err error
+			if operation == "connect" {
+				err = Connect(context.Background(), k, fixtureConfig(), io.Discard)
+			} else {
+				err = InstallAddon(context.Background(), k, fixtureConfig(), io.Discard)
+			}
+			if err == nil || !strings.Contains(err.Error(), "legacy installation") {
+				t.Fatalf("missing migration refusal: %v", err)
+			}
+		})
 	}
 }

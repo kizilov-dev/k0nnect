@@ -3,7 +3,7 @@
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
-import sys
+import re
 
 root=Path(__file__).resolve().parent.parent/'site'
 class Document(HTMLParser):
@@ -19,10 +19,12 @@ class Document(HTMLParser):
 docs={}
 for p in root.rglob('*.html'):
     text=p.read_text()
+    assert not re.search(r'[А-Яа-яЁё]', text), f'Untranslated content in {p}'
+    assert 'k8nnect' not in text.lower(), f'Outdated branding in {p}'
     assert '{{' not in text, f'Unresolved template in {p}'
     doc=Document();doc.feed(text);docs[p.resolve()]=doc
     assert doc.h1==1,f'Expected one H1: {p}'
-    assert doc.lang=='ru',f'Missing lang: {p}'
+    assert doc.lang=='en',f'Missing lang: {p}'
 for p,doc in docs.items():
     for link in doc.links:
         url=urlsplit(link)

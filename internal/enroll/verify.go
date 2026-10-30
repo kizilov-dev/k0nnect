@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 const verifyServer = `import http.server,socket,threading
@@ -56,7 +56,7 @@ func ownedDelete(ctx context.Context, k *kube.Client, path, owner string) error 
 	if e != nil {
 		return e
 	}
-	if kube.Str(kube.Map(kube.Map(obj, "metadata"), "labels"), "k8nnect.io/connection") != owner {
+	if kube.Str(kube.Map(kube.Map(obj, "metadata"), "labels"), "k0nnect.io/connection") != owner {
 		return fmt.Errorf("refusing to delete foreign object %s", path)
 	}
 	return k.Delete(ctx, path)
@@ -72,7 +72,7 @@ func VerifyNode(ctx context.Context, k *kube.Client, c Config, out io.Writer) er
 	checked := 0
 	for _, v := range kube.Items(nodes, "items") {
 		node := kube.As(v)
-		if !nodesReady(node) || kube.Str(kube.Map(kube.Map(node, "metadata"), "labels"), "k8nnect.io/external") == "true" {
+		if !nodesReady(node) || kube.Str(kube.Map(kube.Map(node, "metadata"), "labels"), "k0nnect.io/external") == "true" {
 			continue
 		}
 		internal := kube.Str(kube.Map(node, "metadata"), "name")
@@ -105,9 +105,9 @@ func verifyNodePair(ctx context.Context, k *kube.Client, c Config, internal stri
 	// ClusterIP after that Service was deleted and recreated between node pairs.
 	suffix := strings.ToLower(rand.Text()[:10])
 	serviceNames := map[string]string{"external": "verify-external-" + suffix, "internal": "verify-internal-" + suffix}
-	labels := func(name string) kube.Object { return kube.Object{"app": name, "k8nnect.io/connection": c.Name} }
+	labels := func(name string) kube.Object { return kube.Object{"app": name, "k0nnect.io/connection": c.Name} }
 	paths := []string{ns + "/pods/verify-external", ns + "/pods/verify-internal", ns + "/services/" + serviceNames["external"], ns + "/services/" + serviceNames["internal"], "/apis/batch/v1/namespaces/" + c.Namespace + "/jobs/verify-to-external", "/apis/batch/v1/namespaces/" + c.Namespace + "/jobs/verify-from-external"}
-	services, e := k.Get(ctx, ns+"/services?labelSelector=k8nnect.io%2Fconnection%3D"+c.Name)
+	services, e := k.Get(ctx, ns+"/services?labelSelector=k0nnect.io%2Fconnection%3D"+c.Name)
 	if e != nil {
 		return e
 	}
@@ -151,11 +151,11 @@ func verifyNodePair(ctx context.Context, k *kube.Client, c Config, internal stri
 			}
 		}
 	}
-	tolerance := []any{kube.Object{"key": "k8nnect.io/initializing", "operator": "Exists", "effect": "NoSchedule"}}
+	tolerance := []any{kube.Object{"key": "k0nnect.io/initializing", "operator": "Exists", "effect": "NoSchedule"}}
 	placement := func(external bool) kube.Object {
 		spec := kube.Object{"restartPolicy": "Never", "terminationGracePeriodSeconds": 1, "automountServiceAccountToken": false, "tolerations": tolerance}
 		if external {
-			spec["nodeSelector"] = kube.Object{"k8nnect.io/external": "true", "k8nnect.io/connection": c.Name}
+			spec["nodeSelector"] = kube.Object{"k0nnect.io/external": "true", "k0nnect.io/connection": c.Name}
 		} else {
 			spec["nodeName"] = internal
 		}
@@ -261,11 +261,11 @@ func activateNode(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 	}
 	taints := []any{}
 	for _, v := range kube.Items(kube.Map(n, "spec"), "taints") {
-		if kube.Str(kube.As(v), "key") != "k8nnect.io/initializing" {
+		if kube.Str(kube.As(v), "key") != "k0nnect.io/initializing" {
 			taints = append(taints, v)
 		}
 	}
-	_, e = k.Do(ctx, "PATCH", "/api/v1/nodes/"+c.NodeName, kube.Object{"metadata": kube.Object{"annotations": kube.Object{"k8nnect.io/verified": time.Now().UTC().Format(time.RFC3339)}}, "spec": kube.Object{"taints": taints}})
+	_, e = k.Do(ctx, "PATCH", "/api/v1/nodes/"+c.NodeName, kube.Object{"metadata": kube.Object{"annotations": kube.Object{"k0nnect.io/verified": time.Now().UTC().Format(time.RFC3339)}}, "spec": kube.Object{"taints": taints}})
 	if e == nil {
 		fmt.Fprintln(out, "PASS: scheduler, bidirectional TCP/UDP, large packets, Service DNS, logs and exec; Worker activated")
 	}

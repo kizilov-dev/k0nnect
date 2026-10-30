@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"k8nnect/internal/model"
-	linux "k8nnect/internal/network/linux"
-	"k8nnect/internal/transport"
+	"k0nnect/internal/model"
+	linux "k0nnect/internal/network/linux"
+	"k0nnect/internal/transport"
 )
 
 const protocol = "242"
@@ -52,7 +52,7 @@ type snapshot struct {
 func (d *Driver) Capabilities() transport.Capabilities {
 	return transport.Capabilities{IPv4: true, Encrypted: true}
 }
-func (d *Driver) owner() string { return "k8nnect:v1:" + d.Config.Cluster + ":" + d.Node.Name }
+func (d *Driver) owner() string { return "k0nnect:v1:" + d.Config.Cluster + ":" + d.Node.Name }
 func (d *Driver) run(ctx context.Context, program string, args ...string) ([]byte, error) {
 	return d.Runner.Run(ctx, program, args, nil)
 }

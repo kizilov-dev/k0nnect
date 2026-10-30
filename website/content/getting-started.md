@@ -1,25 +1,25 @@
-# Быстрый старт
+# Quick start
 
-От SSH-доступа к серверу до проверенной Kubernetes-ноды. Прежде чем начать, сверитесь с [матрицей совместимости](compatibility.md): установщик принимает только поддержанный профиль.
+From SSH access to a verified Kubernetes worker. First check the [compatibility matrix](compatibility.md): the installer only accepts supported profiles.
 
-## 1. Собрать CLI
+## 1. Build the CLI
 
-Нужны Linux, Go ≥ 1.26 и установленный `kubectl`.
+You need Linux, Go 1.26 or newer, and `kubectl`.
 
 ```sh
-git clone https://github.com/kizilov-dev/k8nnect.git
-cd k8nnect
+git clone https://github.com/kizilov-dev/k0nnect.git
+cd k0nnect
 make build
 make plugin
 export PATH="$PWD/bin:$PATH"
-k8nnect connect --help
+k0nnect connect --help
 ```
 
-`make plugin` создаёт `bin/kubectl-k8nnect`. Команды можно вызывать и как `kubectl k8nnect`.
+`make plugin` creates `bin/kubectl-k0nnect`. You can also run commands as `kubectl k0nnect`.
 
-## 2. Подготовить доступ
+## 2. Prepare access
 
-Создайте локальный каталог вне репозитория. В примерах это `/secure`; замените его своим путём.
+Create a private directory outside the repository. These examples use `/secure`; replace it with your own path.
 
 ```sh
 install -d -m 700 /secure
@@ -27,64 +27,66 @@ cp examples/connection.json /secure/connection.json
 chmod 600 /secure/connection.json
 ```
 
-Укажите адрес сервера и независимо проверенный Ed25519 fingerprint его SSH-ключа. Пароль храните в отдельном файле `0600`, на который ссылается `passwordFile`. Вместо пароля можно использовать `privateKeyFile` с незашифрованным SSH-ключом. Не добавляйте секреты в Git.
+Set your server's IPv4 address and independently verified Ed25519 SSH fingerprint. Store the password in a separate `0600` file referenced by `passwordFile`. Alternatively, use `privateKeyFile` with an unencrypted SSH private key. Never commit credentials.
 
-Аддон требует файл пароля или ключа. SSH agent доступен только локальному CLI и не передаётся в кластер.
+The addon requires a password or key file. An SSH agent is supported by the local CLI only and is not forwarded into the cluster.
 
-## 3. Проверить без установки
+## 3. Check without making changes
 
 ```sh
-k8nnect connect-check \
+k0nnect connect-check \
   --kubeconfig /secure/cluster.yaml \
   --config /secure/connection.json
 ```
 
-Команда читает API и состояние VDS через закреплённый SSH-ключ. Она не устанавливает пакеты и не изменяет сеть. Поле `cni` в выводе показывает определённый CNI; если его настройки несовместимы, ошибка называет конкретный параметр (см. [совместимость](compatibility.md)).
+This reads the Kubernetes API and server state over pinned SSH. It does not install packages or change the network. The output includes the detected `cni`; incompatible settings are reported as errors.
 
-Затем создайте план:
+Generate a review plan:
 
 ```sh
-k8nnect connect-plan \
+k0nnect connect-plan \
   --kubeconfig /secure/cluster.yaml \
   --config /secure/connection.json \
   --output /secure/connect-review.json
 ```
 
-План формируется локально. Все записи перехватываются в памяти, к реальному API идут только GET, SSH не используется. Значения Secret и исполняемый payload удалены. Этот JSON предназначен для ревью, а не для `kubectl apply`.
+The plan is generated locally. All writes are intercepted in memory, only GET requests reach the real API, and SSH is not used. Secret values and executable payloads are omitted. This JSON is for review, not for `kubectl apply`.
 
-## 4. Установить аддон
+## 4. Install the addon
 
 ```sh
-k8nnect addon-install \
+k0nnect addon-install \
   --kubeconfig /secure/cluster.yaml \
   --config /secure/connection.json
 ```
 
-Аддон создаст Deployment, SSH Secret, конфигурацию и явные RBAC-права. Во время подключения он установит gateway-агенты и зарегистрирует VDS. Администраторский kubeconfig на сервер не копируется.
+The addon creates a Deployment, SSH Secret, configuration, and explicit RBAC permissions. During connection it installs gateway agents and enrolls the server. Your administrator kubeconfig is not copied to the server.
 
 ```sh
 kubectl --kubeconfig /secure/cluster.yaml \
-  -n k8nnect-system logs -f deployment/installer
+  -n k0nnect-system logs -f deployment/installer
 ```
 
-## 5. Проверить результат
+Addon operation has been tested on Calico. The additional CNI profiles were tested through the one-off CLI; addon operation on them remains unverified.
+
+## 5. Verify the result
 
 ```sh
-kubectl --kubeconfig /secure/cluster.yaml get node k8nnect-vds -o wide
+kubectl --kubeconfig /secure/cluster.yaml get node k0nnect-vds -o wide
 kubectl --kubeconfig /secure/cluster.yaml \
-  -n k8nnect-system get configmap connection-status -o yaml
+  -n k0nnect-system get configmap connection-status -o yaml
 ```
 
-Ожидайте Ready и сообщение `Worker connected and verified`. Начальный taint снимается только после тестов Pod. Системные образы и пакеты загружаются при первой установке, поэтому процесс занимает несколько минут.
+Wait for Ready and `Worker connected and verified`. The initial scheduling taint is removed only after Pod tests pass. First installation downloads packages and images, so allow several minutes. kube-router convergence can take an additional route-sync interval.
 
-## Однократное подключение
+## One-off connection
 
-Если управляющий Deployment не нужен, вместо `addon-install` выполните:
+If you do not need the management Deployment, use this instead of `addon-install`:
 
 ```sh
-k8nnect connect \
+k0nnect connect \
   --kubeconfig /secure/cluster.yaml \
   --config /secure/connection.json
 ```
 
-Это тот же механизм установки и проверки. На VDS останутся systemd-сервисы сети и Worker. Для последующего наблюдения используйте [руководство по эксплуатации](operations.md).
+This uses the same installation and verification process. Network and worker systemd services remain on the server. See [operations](operations.md) for monitoring and upgrade instructions.

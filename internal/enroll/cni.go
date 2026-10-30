@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 // Supported CNI profiles. Each one must select the Worker transport address by

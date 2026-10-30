@@ -1,48 +1,50 @@
-# Архитектура подключения
+# Connection architecture
 
-Цель текущего режима — сделать внешнюю VDS обычным Worker **одного** Kubernetes-кластера, сохранив CNI владельцем Pod-сети.
+The current mode enrolls an external server as a regular worker in **one** Kubernetes cluster. The existing CNI keeps ownership of the Pod network.
 
-## Worker в отдельной сети
+## An isolated worker network
 
-На VDS создаётся network namespace `k8nnect`. В нём работают kubelet и встроенный containerd k0s. WireGuard-интерфейс внутри namespace называется `eth1`: так существующая настройка CNI выбирает транспортный адрес новой ноды — Calico `interface=eth1`, Flannel `--iface=eth1`, Cilium `devices=eth1`, а kube-router берёт InternalIP ноды. Pod с hostNetwork на VDS, включая агенты CNI, тоже работают в этом namespace.
+The server gets a network namespace named `k0nnect`. Its kubelet and embedded k0s containerd run there. The WireGuard interface inside is named `eth1`: Calico can select it by interface autodetection, Flannel by its interface flag, Cilium by its devices setting, and kube-router uses the Node InternalIP.
 
-WireGuard-устройство создаётся в основной сети хоста, затем переносится в namespace. Его UDP socket сохраняет исходную сеть, поэтому зашифрованный трафик использует физическое подключение VDS. Физические адреса сервера не меняются.
+Host-network Pods on the external worker, including CNI agents, also use this worker network namespace. Regular Pods have their own Pod namespaces connected by the CNI.
 
-## Gateway на существующих Workers
+The WireGuard device is created in the host network and then moved into the worker namespace. Its UDP socket stays in the original host network, so encrypted outer traffic uses the physical server connection. Physical interface addresses are retained.
 
-DaemonSet запускает gateway-агенты с hostNetwork и NET_ADMIN. Агент владеет интерфейсом `k8ngw0`, маршрутом /32 к новому Worker и правилами iptables с меткой соединения.
+## Gateways on existing workers
 
-Основной gateway обеспечивает доступ из namespace Worker к приватному API, konnectivity и внешней сети. Исходный транспортный адрес Worker маскируется при пересылке через физическую сеть. Отдельные адреса исходных нод доступны через соответствующие WireGuard peers, чтобы инкапсулированный Pod-трафик CNI (VXLAN Calico, Flannel и Cilium, IPIP kube-router) доходил до правильного Worker без маскировки.
+A DaemonSet runs gateway agents with hostNetwork and NET_ADMIN. Each owns `k0ngw0`, a /32 route to the external worker, and comment-tagged iptables rules.
 
-Нода без публичного адреса инициирует соединение к VDS. WireGuard изучает её endpoint из аутентифицированных пакетов. Первый публичный gateway имеет приоритет; автоматическое переключение при его отказе пока отсутствует.
+The primary gateway provides access from the worker namespace to the private API, konnectivity, and external networks. Forwarded traffic from the worker transport address is masqueraded when it leaves another interface. Specific original node addresses are routed through their corresponding WireGuard peers so CNI-encapsulated packets reach the correct node.
 
-## Разделение ответственности
+A worker without a public address initiates a connection to the external server. WireGuard learns its endpoint from authenticated traffic. Public gateways are preferred when selecting the primary; there is no automatic failover.
 
-| Компонент | Ответственность |
+## Ownership boundaries
+
+| Component | Owns |
 | --- | --- |
-| k8nnect | Транспорт, gateway, bootstrap, сверка конфигурации и проверки |
-| k0s / kubelet | Регистрация ноды, запуск runtime, обычный жизненный цикл Pod |
-| CNI | IPAM, Pod-маршруты, инкапсуляция и сетевые политики |
-| Kubernetes | API, scheduler, RBAC, bootstrap CSR и Service |
+| k0nnect | Transport, gateways, bootstrap, reconciliation, and checks |
+| k0s / kubelet | Node enrollment, runtime, and ordinary Pod lifecycle |
+| CNI | IPAM, Pod routes, encapsulation, and network policy |
+| Kubernetes | API, scheduler, RBAC, bootstrap CSRs, and Services |
 
-`Node.spec.podCIDR` не используется как универсальный источник маршрутов: фактическое распределение адресов определяет IPAM CNI. k8nnect не меняет настройки CNI, а только проверяет, что они совместимы с транспортом ([матрица CNI](compatibility.md)).
+`Node.spec.podCIDR` is not a universal source of CNI routes. Discovery checks the actual CNI profile and its address allocation model. See [compatibility](compatibility.md).
 
-## Bootstrap через Kubernetes API
+## Bootstrap through the API
 
-Установщик создаёт стандартный worker bootstrap Secret со сроком один час. В VDS передаётся bootstrap-документ с доверенным CA и короткоживущим token, а не администраторский kubeconfig.
+The installer creates a standard worker bootstrap Secret with a one-hour expiry. Only a bootstrap document containing the trusted CA and short-lived token is copied to the server. The administrator kubeconfig stays on the workstation.
 
-Для новой ноды клонируется worker-профиль k0s. Из него убираются cgroup-настройки, специфичные для runtime провайдера; задаётся отдельный resolver. На чтение этого профиля создаётся ограниченный RBAC grant новой ноде и её bootstrap-пользователю.
+A k0s worker profile is cloned, provider-specific runtime cgroup values are removed, and a dedicated resolver is configured. A named RBAC grant lets the new node and its bootstrap identity read only that profile.
 
-Serving CSR проверяется по identity, подписи, CN, organization и SAN. После регистрации bootstrap token отзывается. Нода остаётся с начальным taint до завершения workload-проверок.
+Serving CSRs are checked for requestor identity, signature, CN, organization, and SANs before approval. The token is revoked after enrollment. An initialization taint blocks ordinary scheduling until workload verification passes.
 
-## Постоянное управление
+## Continuous management
 
-Аддон — это Deployment, ConfigMap и SSH Secret. Установщик остаётся на исходных Workers и повторяет сверку примерно раз в минуту. На VDS systemd запускает сеть перед kubelet; агент продолжает сверку сети независимо от управляющего Pod.
+The addon consists of a Deployment, ConfigMaps, and SSH Secret. Its installer stays on the original workers and reconciles approximately once a minute. On the server, systemd orders network setup before kubelet; a local agent maintains the worker network independently of the management Pod.
 
-Текущая упаковка передаёт статический Go binary в сжатых ConfigMap-фрагментах и использует Ubuntu-контейнеры с установкой runtime tools. Отдельный OCI-образ — следующий этап упаковки.
+The current package ships a static Go binary in compressed ConfigMap chunks and installs runtime tools in Ubuntu containers. A dedicated OCI image is future work.
 
-## Граница транспорта
+## Transport boundary
 
-В статическом профиле `transport.Driver` отделяет сверку, состояние и удаление от transport-specific настроек. WireGuard — первая реализация. Автоматический установщик текущего профиля пока непосредственно использует WireGuard; новый транспорт потребует отдельной реализации и проверки bootstrap-схемы.
+The static profile uses `transport.Driver` to separate reconciliation, status, and removal from transport-specific settings. WireGuard is the first implementation. The automatic installer currently uses WireGuard directly; a different transport needs its own implementation and bootstrap validation.
 
-Объединение независимых кластеров потребует другого режима с явным экспортом префиксов, Service и trust. Оно не считается дополнительным вариантом подключения Worker.
+Interconnecting independent clusters requires a separate mode with explicit prefix and Service exports and trust boundaries.

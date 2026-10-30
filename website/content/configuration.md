@@ -1,16 +1,16 @@
-# Конфигурация
+# Configuration
 
-CLI читает JSON-файл соединения. Один и тот же файл используется для проверки, подключения, установки аддона и удаления.
+The CLI reads a connection JSON file. Use the same file for checks, enrollment, addon installation, verification, and removal.
 
-## Пример
+## Example
 
-Адрес и fingerprint ниже — заглушки. Подставьте реальный адрес VDS и проверенный SSH fingerprint.
+The address and fingerprint below are placeholders. Replace them with your server's actual address and verified SSH fingerprint.
 
 ```json
 {
   "name": "external-worker",
-  "nodeName": "k8nnect-vds",
-  "namespace": "k8nnect-system",
+  "nodeName": "k0nnect-vds",
+  "namespace": "k0nnect-system",
   "host": "203.0.113.10",
   "user": "root",
   "sshPort": 22,
@@ -23,40 +23,42 @@ CLI читает JSON-файл соединения. Один и тот же ф�
 }
 ```
 
-## Имена и доступ
+## Identity and SSH access
 
-| Поле | Значение |
+| Field | Meaning |
 | --- | --- |
-| `name` | Имя соединения; используется для меток и проверки владения |
-| `nodeName` | Имя нового Kubernetes Node |
-| `namespace` | Пространство имён аддона; по умолчанию `k8nnect-system` |
-| `host` | IPv4-адрес VDS; DNS-имена пока не поддержаны |
-| `user` | Сейчас только `root` |
-| `sshPort` | SSH-порт; по умолчанию 22 |
-| `hostKeySHA256` | Закреплённый fingerprint; текущий preflight использует Ed25519 |
-| `passwordFile` | Локальный файл с паролем |
-| `privateKeyFile` | Альтернатива паролю: путь к SSH private key без passphrase |
+| `name` | Connection identity used for labels and ownership checks |
+| `nodeName` | Name of the new Kubernetes Node |
+| `namespace` | Addon namespace; defaults to `k0nnect-system` |
+| `host` | Literal server IPv4 address; hostnames are not supported |
+| `user` | Currently requires `root` |
+| `sshPort` | SSH port; defaults to 22 |
+| `hostKeySHA256` | Pinned host fingerprint; the tested preflight uses Ed25519 |
+| `passwordFile` | Local file containing the SSH password |
+| `privateKeyFile` | Alternative: an SSH private key file without a passphrase |
 
-Имена начинаются с латинской буквы в нижнем регистре, затем допускают буквы, цифры и дефис; максимум 41 символ.
+Names start with a lowercase ASCII letter, followed by lowercase letters, numbers, or hyphens. The maximum length is 41 characters.
 
-## Адреса и MTU
+## Addresses and ports
 
-| Поле | Ограничение |
+| Field | Constraint |
 | --- | --- |
-| `transportCIDR` | Приватная каноническая IPv4 /24 без пересечений |
-| `workerAddress` | Внутри transportCIDR; последний октет 100–254 |
-| `port` | UDP-порт gateway из диапазона NodePort: 30000–32766; по умолчанию 31820 |
-| `mtu` | MTU транспорта WireGuard: 1280–1440; по умолчанию 1400 |
-| `k0sVersion` | Необязательная версия k0s; обычно определяется из worker-профиля |
+| `transportCIDR` | Non-overlapping, canonical private IPv4 /24 |
+| `workerAddress` | Inside transportCIDR, with last octet 100–254 |
+| `port` | Gateway UDP port in 30000–32766; defaults to 31820 |
+| `mtu` | WireGuard transport MTU, 1280–1440; defaults to 1400 |
+| `k0sVersion` | Optional k0s release; normally discovered from the worker profile |
 
-На VDS WireGuard слушает `port + 1`. Первые адреса /24 выделяются gateway-нодам, поэтому диапазон Worker начинается с `.100`. Не меняйте адрес уже присоединённой ноды: сначала выполните контролируемое отключение.
+The server listens on `port + 1`. Initial /24 addresses are assigned to gateways, leaving `.100` onward for the worker. Changing an enrolled node's transport address requires a controlled disconnect first.
 
-`mtu` задаёт MTU интерфейса gateway `k8ngw0` и маршрута по умолчанию в namespace Worker. Сам интерфейс `eth1` на VDS получает MTU сети исходных нод: gateway-агенты публикуют его в аннотации `k8nnect.io/node-mtu`, установщик берёт минимум. CNI вычисляет MTU Pod от `eth1`, поэтому Pod на VDS получают тот же MTU, что и на остальных нодах. Иначе пакеты, которые больше MTU Pod на VDS, молча отбрасывались бы после туннеля CNI. Внешние пакеты больше транспортного MTU фрагментирует WireGuard.
+## MTU
 
-Настройки MTU самого CNI не меняются. Вложенная инкапсуляция и фрагментация проверяются отдельными TCP/UDP-тестами.
+`mtu` controls the gateway interface `k0ngw0` and the default route inside the worker namespace. The server's `eth1` uses the original node network's MTU: gateways publish it in `k0nnect.io/node-mtu`, and the installer selects the minimum.
 
-## Где хранятся настройки
+CNIs that derive Pod MTU from `eth1` can then use a consistent Pod MTU across locations. Oversized outer packets are fragmented. CNI MTU configuration itself is not patched; nested encapsulation and fragmentation are checked by TCP/UDP probes.
 
-Аддон монтирует публичную конфигурацию из ConfigMap `connection`, а SSH-креды — из Secret `vds-ssh`. Статус находится в ConfigMap `connection-status`.
+## Where configuration lives
 
-На VDS каталог `/etc/k8nnect` содержит конфигурацию сети, приватный ключ WireGuard, маркер владения, resolver и bootstrap-файл. Доступ к этим данным нужен только root.
+The addon mounts public connection settings from ConfigMap `connection` and SSH credentials from Secret `vds-ssh`. ConfigMap `connection-status` contains reconciliation status.
+
+On the server, `/etc/k0nnect` holds network configuration, the private WireGuard key, ownership marker, resolver, and bootstrap file. These files are intended for root only.

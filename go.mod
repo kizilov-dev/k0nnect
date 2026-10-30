@@ -1,4 +1,4 @@
-module k8nnect
+module k0nnect
 
 go 1.26.0
 

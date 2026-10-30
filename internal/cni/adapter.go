@@ -5,8 +5,8 @@ package cni
 import (
 	"fmt"
 	"io"
-	"k8nnect/internal/cni/flannel"
-	"k8nnect/internal/model"
+	"k0nnect/internal/cni/flannel"
+	"k0nnect/internal/model"
 )
 
 type Adapter interface {

@@ -23,12 +23,12 @@ outside this prototype. There is no implicit trust federation.
 ## ADR-002: ownership and compatibility
 
 The driver owns one WireGuard interface with alias
-`k8nnect:v1:<cluster>:<node>`, a single /32 address and main-table routes using
+`k0nnect:v1:<cluster>:<node>`, a single /32 address and main-table routes using
 protocol 242. Reserve protocol 242 for this installation and do not give it a
 symbolic mapping in iproute2's rt_protos files. Other protocols, interfaces,
 addresses and conflicting routes cause rejection before mutation.
 
-The CNI owns Pod routes, IPAM and service networking. k8nnect never writes those
+The CNI owns Pod routes, IPAM and service networking. k0nnect never writes those
 routes, existing firewall rules, CNI CRDs or default routes. The prototype uses
 WireGuard to provide node IP connectivity underneath Flannel VXLAN. All nodes,
 including controllers, need participating transport addresses and a reviewed CNI

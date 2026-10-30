@@ -29,7 +29,7 @@ when the API permits bootstrap token creation and normal kubelet bootstrap.
 
 ## Network design
 
-On the VDS, kubelet and embedded containerd run in network namespace `k8nnect`.
+On the VDS, kubelet and embedded containerd run in network namespace `k0nnect`.
 Its WireGuard interface is named `eth1` so the existing CNI node address selection
 (Calico `interface=eth1`, Flannel `--iface=eth1`, Cilium `devices=eth1`, the
 kube-router Node InternalIP) chooses the transport address. The device is created in the host namespace
@@ -37,7 +37,7 @@ and moved into the worker namespace, retaining its UDP socket in the host networ
 The VDS physical interfaces retain their addresses.
 
 Gateway agents run on the existing workers using hostNetwork and NET_ADMIN. They
-own interface `k8ngw0`, worker /32 routes with protocol 242 and comment-tagged
+own interface `k0ngw0`, worker /32 routes with protocol 242 and comment-tagged
 iptables forwarding/SNAT rules. The worker namespace default route uses the first
 public gateway to reach the private controller, konnectivity and Internet.
 Specific original node IP /32 routes keep CNI tunnel endpoints (VXLAN, Geneve,
@@ -46,9 +46,9 @@ retains ownership of Pod routes and pools.
 A gateway without a public address initiates WireGuard to the public VDS and its
 endpoint is learned from authenticated packets. This requires outbound UDP and
 return traffic; it is not arbitrary NAT traversal. There is no primary gateway
-failover yet. The transport MTU is 1400 (gateway `k8ngw0` and the worker default
+failover yet. The transport MTU is 1400 (gateway `k0ngw0` and the worker default
 route). The worker `eth1` instead carries the existing nodes' interface MTU,
-published by gateway agents as `k8nnect.io/node-mtu`: CNIs derive the Pod MTU from
+published by gateway agents as `k0nnect.io/node-mtu`: CNIs derive the Pod MTU from
 it, and a smaller Pod MTU on the VDS made larger packets arriving through Flannel
 or Cilium tunnels vanish at the Pod veth. Larger outer packets are fragmented by
 the kernel; the CNI MTU itself is not patched.
@@ -78,17 +78,17 @@ This is privileged infrastructure software and is not a namespace security bound
 ## CLI and addon
 
 Build a static binary with Go >= 1.26 (`make build`). `make plugin` additionally
-creates `bin/kubectl-k8nnect`; add this directory to PATH to use `kubectl k8nnect`.
+creates `bin/kubectl-k0nnect`; add this directory to PATH to use `kubectl k0nnect`.
 Copy `examples/connection.json`, supply a root-only password/key file and replace
 the documentation endpoint and fingerprint with independently verified values.
 
 ```sh
-bin/k8nnect connect-check --kubeconfig /secure/cluster.yaml --config /secure/connection.json
-bin/k8nnect connect-plan --kubeconfig /secure/cluster.yaml --config /secure/connection.json --output /tmp/connect-review.json
+bin/k0nnect connect-check --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+bin/k0nnect connect-plan --kubeconfig /secure/cluster.yaml --config /secure/connection.json --output /tmp/connect-review.json
 # Install and run continuously in the cluster:
-bin/k8nnect addon-install --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+bin/k0nnect addon-install --kubeconfig /secure/cluster.yaml --config /secure/connection.json
 # Or connect once from the workstation:
-bin/k8nnect connect --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+bin/k0nnect connect --kubeconfig /secure/cluster.yaml --config /secure/connection.json
 ```
 
 `connect-check` authenticates SSH and reads compatibility/state without mutation.
@@ -99,10 +99,10 @@ The initial packaging ships the executable in compressed ConfigMap chunks and
 installs runtime tools in Ubuntu containers; a dedicated image is future work.
 
 ```sh
-kubectl -n k8nnect-system get configmap connection-status -o yaml
-kubectl -n k8nnect-system logs deployment/installer
-kubectl get node k8nnect-vds -o wide
-bin/k8nnect verify-node --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+kubectl -n k0nnect-system get configmap connection-status -o yaml
+kubectl -n k0nnect-system logs deployment/installer
+kubectl get node k0nnect-vds -o wide
+bin/k0nnect verify-node --kubeconfig /secure/cluster.yaml --config /secure/connection.json
 ```
 
 The worker initially has an initialization NoSchedule taint. Verification schedules
@@ -115,7 +115,7 @@ cloud-provider behavior and sustained load are not yet certified.
 ## Removal
 
 ```sh
-bin/k8nnect disconnect --drain --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+bin/k0nnect disconnect --drain --kubeconfig /secure/cluster.yaml --config /secure/connection.json
 ```
 
 Removal scales down the installer, cordons and drains the worker respecting PDBs,

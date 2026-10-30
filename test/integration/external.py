@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in transport probe: SSH VDS <-> a disposable, non-host-network Pod.
 
-Requires working SSH key authentication, a built bin/k8nnect, and wireguard-tools,
+Requires working SSH key authentication, a built bin/k0nnect, and wireguard-tools,
 iproute2 and ping on the VDS. Installs tools only inside the disposable Pod.
 The Kubernetes fields in the inventory are transport-test fixtures: this script
 does NOT join a worker, validate a CNI profile, or migrate existing node addresses.
@@ -86,12 +86,12 @@ def main():
     parser.add_argument('--report', required=True)
     args = parser.parse_args()
     root = pathlib.Path(__file__).resolve().parents[2]
-    binary = (root/'bin/k8nnect').read_bytes()
+    binary = (root/'bin/k0nnect').read_bytes()
     def terminate(_signal, _frame):
         raise KeyboardInterrupt('test interrupted')
     signal.signal(signal.SIGTERM, terminate)
     stamp = str(time.time_ns())
-    namespace = 'k8nnect-transport-'+stamp
+    namespace = 'k0nnect-transport-'+stamp
     k = [args.kubectl, '--kubeconfig', args.kubeconfig, '--request-timeout=20s']
     ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new',
            '-o', 'UserKnownHostsFile='+args.known_hosts, '-o', 'ConnectTimeout=10',
@@ -122,27 +122,27 @@ def main():
             'umask 077; cat > '+shlex.quote(path)+'; chmod '+mode+' '+shlex.quote(path))], data)
 
     def vds_command(command, check=True):
-        line = (shlex.quote(remote_dir+'/k8nnect')+' '+command+
+        line = (shlex.quote(remote_dir+'/k0nnect')+' '+command+
                 ' --config '+shlex.quote(remote_dir+'/inventory.json')+' --node vds-probe')
         return remote(line, check=check)
 
     def pod_command(command, check=True):
-        return pod(['/tmp/k8nnect']+shlex.split(command)+[
+        return pod(['/tmp/k0nnect']+shlex.split(command)+[
             '--config','/tmp/inventory.json','--node','cluster-probe'], check=check)
 
     try:
         phase('Create isolated probe Pod and UDP NodePort')
         ns = {'apiVersion':'v1','kind':'Namespace','metadata':{'name':namespace,
-              'labels':{'app.kubernetes.io/managed-by':'k8nnect-integration-test',
+              'labels':{'app.kubernetes.io/managed-by':'k0nnect-integration-test',
                         'pod-security.kubernetes.io/enforce':'privileged'}}}
         execute(k+['create','-f','-'], json.dumps(ns).encode())
         created = True
         install = ('apt-get update -qq && apt-get install -y --no-install-recommends '
                    'wireguard-tools iproute2 iputils-ping python3 && '
-                   'touch /tmp/k8nnect-ready && exec sleep infinity')
+                   'touch /tmp/k0nnect-ready && exec sleep infinity')
         resources = {'apiVersion':'v1','kind':'List','items':[
             {'apiVersion':'v1','kind':'Pod','metadata':{'name':'probe','namespace':namespace,
-             'labels':{'app':'k8nnect-transport-probe'}},
+             'labels':{'app':'k0nnect-transport-probe'}},
              'spec':{'nodeName':args.cluster_node,'automountServiceAccountToken':False,
              'containers':[{'name':'probe','image':'ubuntu:24.04',
                 'command':['bash','-ec',install],
@@ -151,22 +151,22 @@ def main():
                     'capabilities':{'add':['NET_ADMIN','NET_RAW']}},
                 'resources':{'requests':{'cpu':'25m','memory':'64Mi'},
                              'limits':{'cpu':'500m','memory':'384Mi'}},
-                'readinessProbe':{'exec':{'command':['test','-f','/tmp/k8nnect-ready']},
+                'readinessProbe':{'exec':{'command':['test','-f','/tmp/k0nnect-ready']},
                                    'periodSeconds':2}}]}},
             {'apiVersion':'v1','kind':'Service','metadata':{'name':'wireguard','namespace':namespace},
              'spec':{'type':'NodePort','externalTrafficPolicy':'Local',
-                'selector':{'app':'k8nnect-transport-probe'},
+                'selector':{'app':'k0nnect-transport-probe'},
                 'ports':[{'name':'wireguard','protocol':'UDP','port':31820,
                           'targetPort':31820,'nodePort':31820}]}}
         ]}
         execute(k+['apply','-f','-'],json.dumps(resources).encode())
         execute(k+['-n',namespace,'wait','--for=condition=Ready','pod/probe','--timeout=150s'],timeout=170)
         phase('Create local keys and upload binary; no private keys leave their host')
-        remote_dir = remote('mktemp -d /root/k8nnect-transport.XXXXXXXX').stdout.decode().strip()
-        if not remote_dir.startswith('/root/k8nnect-transport.') or '\n' in remote_dir:
+        remote_dir = remote('mktemp -d /root/k0nnect-transport.XXXXXXXX').stdout.decode().strip()
+        if not remote_dir.startswith('/root/k0nnect-transport.') or '\n' in remote_dir:
             raise RuntimeError('unexpected remote directory')
-        put_remote(remote_dir+'/k8nnect',binary,'0700')
-        pod(['sh','-ec','umask 077; cat > /tmp/k8nnect; chmod 0700 /tmp/k8nnect'],binary)
+        put_remote(remote_dir+'/k0nnect',binary,'0700')
+        pod(['sh','-ec','umask 077; cat > /tmp/k0nnect; chmod 0700 /tmp/k0nnect'],binary)
         vds_public = remote('umask 077; wg genkey > '+shlex.quote(remote_dir+'/node.key')+
                             '; wg pubkey < '+shlex.quote(remote_dir+'/node.key')).stdout.decode().strip()
         pod_public = pod(['sh','-ec','umask 077; wg genkey > /tmp/node.key; wg pubkey < /tmp/node.key']).stdout.decode().strip()
@@ -174,7 +174,7 @@ def main():
             if len(base64.b64decode(key,validate=True))!=32: raise RuntimeError('invalid public key')
         inventory = json.loads((root/'examples/inventory.json').read_text())
         inventory['cluster']='transport-probe'
-        inventory['transport'].update(interface='k8nprobe0',cidr='10.203.73.0/24')
+        inventory['transport'].update(interface='k0nprobe0',cidr='10.203.73.0/24')
         # Synthetic Kubernetes profile required by the current driver constructor.
         # No command in this harness uses Kubernetes join or changes real CNI state.
         inventory['kubernetes']['apiServer']='10.203.73.1:6443'
@@ -205,7 +205,7 @@ def main():
         report['checks'].append({'name':'pod-to-vds-echo','result':json.loads(result.stdout)})
         phase('Reapply and recover after interface-down')
         vds_command('apply'); pod_command('apply')
-        remote('ip link set k8nprobe0 down')
+        remote('ip link set k0nprobe0 down')
         if vds_command('verify',check=False).returncode==0:
             raise RuntimeError('verify unexpectedly passed while interface was down')
         vds_command('apply'); vds_command('verify'); pod_command('verify')
@@ -240,7 +240,7 @@ def main():
                        shlex.quote(remote_dir+'/echo.py')+'; then kill "$task_pid"; fi; fi')
                 if applied_vds:
                     vds_command('remove --drained')
-                remote('test ! -e /sys/class/net/k8nprobe0')
+                remote('test ! -e /sys/class/net/k0nprobe0')
                 remote('rm -rf -- '+shlex.quote(remote_dir))
             except Exception as exc:
                 report['cleanupErrors'].append('VDS: '+str(exc))

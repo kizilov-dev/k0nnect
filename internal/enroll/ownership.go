@@ -3,7 +3,7 @@ package enroll
 import (
 	"context"
 	"fmt"
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 func applyOwned(ctx context.Context, k *kube.Client, c Config, collection, name string, obj kube.Object) error {
@@ -16,9 +16,9 @@ func applyOwned(ctx context.Context, k *kube.Client, c Config, collection, name 
 		labels = kube.Object{}
 		metadata["labels"] = labels
 	}
-	labels["k8nnect.io/connection"] = c.Name
+	labels["k0nnect.io/connection"] = c.Name
 	if existing, e := k.Get(ctx, collection+"/"+name); e == nil {
-		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "labels"), "k8nnect.io/connection") != c.Name {
+		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "labels"), "k0nnect.io/connection") != c.Name {
 			return fmt.Errorf("refusing to overwrite foreign resource %s/%s", collection, name)
 		}
 	} else if !kube.Code(e, 404) {

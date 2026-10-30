@@ -1,9 +1,9 @@
 package planner
 
 import (
-	"k8nnect/internal/cni"
-	"k8nnect/internal/model"
-	"k8nnect/internal/transport"
+	"k0nnect/internal/cni"
+	"k0nnect/internal/model"
+	"k0nnect/internal/transport"
 )
 
 type Plan struct {

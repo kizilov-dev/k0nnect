@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 type plannedRequest struct {
@@ -98,7 +98,7 @@ func Preview(ctx context.Context, k *kube.Client, c Config, path string, out io.
 	if _, e = workerProfile(ctx, &shadow, c, source, minor); e != nil {
 		return e
 	}
-	result := kube.Object{"previewOnly": true, "secretsRedacted": true, "realMutations": 0, "connection": c.Name, "namespace": c.Namespace, "externalNode": c.NodeName, "vds": c.Host, "cni": c.CNI, "gatewayNodes": names, "workerAddress": c.WorkerAddress, "controllerAddresses": kube.Str(kube.Map(source, "data"), "apiServerAddresses"), "bootstrapSecret": tokenName(c), "bootstrapLifetime": "1h; revoked after join or a failed attempt", "kubernetesRequests": transport.requests, "remotePreparation": prepareScript(c), "remoteNetworkUnits": networkUnitsScript(), "remoteWorkerInstallation": installScript(c, "k8nnect-"+c.Name), "notes": []string{"WireGuard public keys are illustrative placeholders until generated on their owning hosts", "Binary ConfigMap payloads and SSH Secret values are redacted: this is a review artifact, not a kubectl apply manifest", "Existing CNI resources and node addresses are not patched", "Installer remains on existing workers; the new worker starts with an initialization taint until scheduler, TCP/UDP, DNS, logs and exec verification succeeds"}}
+	result := kube.Object{"previewOnly": true, "secretsRedacted": true, "realMutations": 0, "connection": c.Name, "namespace": c.Namespace, "externalNode": c.NodeName, "vds": c.Host, "cni": c.CNI, "gatewayNodes": names, "workerAddress": c.WorkerAddress, "controllerAddresses": kube.Str(kube.Map(source, "data"), "apiServerAddresses"), "bootstrapSecret": tokenName(c), "bootstrapLifetime": "1h; revoked after join or a failed attempt", "kubernetesRequests": transport.requests, "remotePreparation": prepareScript(c), "remoteNetworkUnits": networkUnitsScript(), "remoteWorkerInstallation": installScript(c, "k0nnect-"+c.Name), "notes": []string{"WireGuard public keys are illustrative placeholders until generated on their owning hosts", "Binary ConfigMap payloads and SSH Secret values are redacted: this is a review artifact, not a kubectl apply manifest", "Existing CNI resources and node addresses are not patched", "Installer remains on existing workers; the new worker starts with an initialization taint until scheduler, TCP/UDP, DNS, logs and exec verification succeeds"}}
 	b, e := json.MarshalIndent(result, "", "  ")
 	if e != nil {
 		return e

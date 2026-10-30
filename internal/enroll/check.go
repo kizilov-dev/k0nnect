@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 // Check authenticates and reads state only; it never installs or configures.
@@ -22,7 +22,7 @@ func Check(ctx context.Context, k *kube.Client, c Config, out io.Writer) error {
 		return e
 	}
 	defer r.Close()
-	script := "import json,os,platform,shutil; print(json.dumps({'uid':os.getuid(),'os':platform.system(),'architecture':platform.machine(),'aptAvailable':shutil.which('apt-get') is not None,'managedInstallation':os.path.isfile('/etc/k8nnect/managed.json'),'workerNamespaceExists':os.path.exists('/run/netns/k8nnect'),'k0sInstalled':shutil.which('k0s') is not None}))"
+	script := "import json,os,platform,shutil; print(json.dumps({'uid':os.getuid(),'os':platform.system(),'architecture':platform.machine(),'aptAvailable':shutil.which('apt-get') is not None,'managedInstallation':os.path.isfile('/etc/k0nnect/managed.json'),'workerNamespaceExists':os.path.exists('/run/netns/k0nnect'),'k0sInstalled':shutil.which('k0s') is not None}))"
 	b, e := r.Run(ctx, "python3 -c "+Quote(script), nil)
 	if e != nil {
 		return e

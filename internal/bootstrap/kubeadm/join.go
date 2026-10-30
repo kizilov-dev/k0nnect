@@ -5,7 +5,7 @@ package kubeadm
 import (
 	"encoding/json"
 	"fmt"
-	"k8nnect/internal/model"
+	"k0nnect/internal/model"
 	"regexp"
 )
 

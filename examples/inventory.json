@@ -4,7 +4,7 @@
   "cluster": "lab",
   "transport": {
     "driver": "wireguard",
-    "interface": "k8n0",
+    "interface": "k0n0",
     "cidr": "10.203.0.0/24",
     "mtu": 1400,
     "pathMTU": 1500
@@ -27,7 +27,7 @@
       "endpoint": "192.0.2.10:51820",
       "wireguard": {
         "publicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
-        "privateKeyFile": "/etc/k8nnect/node.key"
+        "privateKeyFile": "/etc/k0nnect/node.key"
       }
     },
     {
@@ -36,7 +36,7 @@
       "endpoint": "198.51.100.20:51820",
       "wireguard": {
         "publicKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
-        "privateKeyFile": "/etc/k8nnect/node.key"
+        "privateKeyFile": "/etc/k0nnect/node.key"
       }
     }
   ]

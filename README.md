@@ -1,77 +1,79 @@
 <div align="center">
 
-<img src="website/assets/logo.svg" width="72" height="72" alt="k8nnect">
+<img src="website/assets/logo.svg" width="72" height="72" alt="k0nnect">
 
-# k8nnect
+# k0nnect
 
-**Свой сервер. Тот же Kubernetes.**
+**Your server. Your Kubernetes cluster.**
 
-Подключение внешней VDS как полноценного Worker через SSH и WireGuard.
-CLI для установки, аддон для поддержания соединения.
+Enroll an external Linux server as a Kubernetes worker over SSH and WireGuard.
+A CLI for installation. An addon for ongoing connection management.
 
-[Сайт](https://kizilov-dev.github.io/k8nnect/) · [Быстрый старт](#быстрый-старт) · [Документация](https://kizilov-dev.github.io/k8nnect/docs/) · [Архитектура](docs/architecture.md) · [Результаты испытаний](docs/cni-matrix-2026-10-30.md)
+[Website](https://kizilov-dev.github.io/k0nnect/) · [Quick start](#quick-start) · [Documentation](https://kizilov-dev.github.io/k0nnect/docs/) · [Architecture](docs/architecture.md) · [Live test matrix](docs/cni-matrix-2026-10-30.md)
 
 </div>
 
 ---
 
-k8nnect устанавливает ПО на внешнем Linux-сервере, создаёт защищённую связь с
-существующими Workers и регистрирует новый kubelet в **том же кластере**. После
-проверок сервер участвует в обычном планировании Pod.
+k0nnect installs the worker software, connects an external server to your existing
+workers, and enrolls kubelet into **the same cluster**. The new node accepts
+ordinary workloads after end-to-end checks pass.
 
-Рабочий MVP проверен на **k0s 1.36.4** с четырьмя CNI: **Calico 3.32.2** (VXLAN),
-**Flannel 0.28.9** (VXLAN), **Cilium 1.20.1** (tunnel, kube-proxy replacement) и
-**kube-router 2.10.0** (BGP + IPIP overlay). CNI определяется автоматически; его
-настройки k8nnect не меняет, а несовместимые отвергает. Подключение независимых
-кластеров — отдельный, пока не реализованный режим.
+The experimental connector has passed live tests with **k0s 1.36.4** and four
+CNI profiles: **Calico 3.32.2** (VXLAN), **Flannel 0.28.9** (VXLAN),
+**Cilium 1.20.1** (tunnel/VXLAN with kube-proxy replacement), and
+**kube-router 2.10.0** (BGP + IPIP overlay). It discovers and validates the CNI;
+it does not replace its configuration. Independent-cluster interconnection is a
+separate, unimplemented product mode.
 
-## Что делает утилита
+## What it does
 
-- Определяет CNI кластера, проверяет совместимость его настроек и закреплённый SSH-ключ VDS.
-- Устанавливает WireGuard, k0s worker и systemd-сервисы; недостающие стандартные
-  CNI-плагины ставит из закреплённого по sha256 релиза.
-- Запускает gateway-агенты на существующих Workers.
-- Регистрирует ноду через краткоживущий bootstrap token, затем отзывает его.
-- Проверяет планирование, TCP/UDP с каждым существующим Ready Worker, Service DNS, logs и exec.
-- Снимает начальный NoSchedule taint только после успешных проверок.
-- В режиме аддона поддерживает конфигурацию и сообщает состояние через ConfigMap.
+- Validates k0s/CNI compatibility, address overlap, and the pinned SSH host key.
+- Installs k0s worker, WireGuard, and systemd services on the external server.
+- Adds missing reference CNI plugins from a SHA256-pinned release.
+- Runs gateway agents on the original Ready workers.
+- Enrolls the node with a short-lived bootstrap token and revokes it afterward.
+- Checks scheduling, bidirectional TCP/UDP against every original worker, Service DNS, logs, and exec.
+- Removes the initialization NoSchedule taint only after verification succeeds.
+- Reconciles the connection and reports status when installed as an addon.
 
-Физические интерфейсы сервера сохраняют свои адреса. Kubelet и containerd работают
-в отдельном network namespace; CNI кластера остаётся владельцем Pod-маршрутов и IPAM.
+Physical server addresses stay in place. Kubelet and containerd use a dedicated
+network namespace. The CNI retains ownership of Pod routes and IPAM.
 
-## Требования
+## Requirements
 
-| Компонент | Поддерживаемая конфигурация |
+| Component | Supported profile |
 | --- | --- |
-| Кластер | k0s, Linux/amd64 Workers, одинаковая minor-версия Kubernetes |
-| CNI | IPv4 с инкапсуляцией и выбором адреса ноды по `eth1`: Calico VXLAN, Flannel VXLAN, Cilium tunnel или kube-router с overlay — [подробно](https://kizilov-dev.github.io/k8nnect/docs/compatibility/) |
-| VDS | Linux/amd64, root SSH, systemd, apt, Python 3, поддержка WireGuard в ядре |
-| Доступ | kubeconfig с правами установки RBAC, gateway-агентов и worker bootstrap |
-| Сеть | Непересекающаяся приватная /24, UDP к gateway и VDS, доступ к пакетам и образам |
-| Сборка | Go ≥ 1.26, Linux; локальному CLI нужен `kubectl` |
+| Cluster | k0s, Linux/amd64 workers on the same Kubernetes minor version |
+| CNI | Validated IPv4 encapsulation profile for Calico, Flannel, Cilium, or kube-router |
+| Server | root SSH, systemd, apt, Python 3, kernel WireGuard support |
+| Access | kubeconfig with installation, RBAC, and worker-bootstrap permissions |
+| Network | Non-overlapping private /24, gateway/server UDP access, package and image access |
+| Build | Linux, Go 1.26 or newer; workstation CLI also needs kubectl |
 
-SSH на control plane не требуется, если API разрешает стандартный worker bootstrap.
-Первый установщик поддерживает **одну внешнюю VDS на кластер**. Автоматического
-переключения основного gateway пока нет.
+See the [CNI compatibility matrix](https://kizilov-dev.github.io/k0nnect/docs/compatibility/).
+Control-plane SSH is not required if the Kubernetes API permits normal worker
+bootstrap. The initial installer supports **one external server per cluster**.
+Automatic primary-gateway failover is not implemented.
 
-## Быстрый старт
+## Quick start
 
-### 1. Собрать
+### 1. Build
 
 ```sh
-git clone https://github.com/kizilov-dev/k8nnect.git
-cd k8nnect
+git clone https://github.com/kizilov-dev/k0nnect.git
+cd k0nnect
 make build
-make plugin                       # bin/kubectl-k8nnect
+make plugin                       # bin/kubectl-k0nnect
 export PATH="$PWD/bin:$PATH"
 ```
 
-### 2. Подготовить настройки
+### 2. Configure
 
-Скопируйте [examples/connection.json](examples/connection.json) за пределы
-репозитория. Укажите адрес VDS и проверенный **Ed25519 fingerprint** SSH-сервера.
-`passwordFile` или `privateKeyFile` должен ссылаться на локальный файл с правами
-`0600`. Не храните пароль в JSON. Адрес `203.0.113.10` в примере — заглушка.
+Copy [examples/connection.json](examples/connection.json) to a private directory
+outside the repository. Replace the documentation address and pinned Ed25519 SSH
+fingerprint. Use a local `0600` password/key file referenced by `passwordFile`
+or `privateKeyFile`; do not put a password inline in JSON.
 
 ```sh
 install -d -m 700 /secure
@@ -79,78 +81,81 @@ cp examples/connection.json /secure/connection.json
 chmod 600 /secure/connection.json
 ```
 
-### 3. Проверить без изменений
+### 3. Check and preview
 
 ```sh
-k8nnect connect-check --kubeconfig /secure/cluster.yaml --config /secure/connection.json
-k8nnect connect-plan --kubeconfig /secure/cluster.yaml --config /secure/connection.json \
+k0nnect connect-check --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+k0nnect connect-plan --kubeconfig /secure/cluster.yaml --config /secure/connection.json \
   --output /secure/connect-review.json
 ```
 
-`connect-check` читает состояние API и VDS через SSH; поле `cni` в выводе показывает
-определённый CNI, а несовместимая настройка CNI называется в ошибке. `connect-plan` создаёт
-обезличенный план локально, отправляет только GET в реальный API и не использует
-SSH. План предназначен для ревью, а не для `kubectl apply`.
+`connect-check` reads cluster/server state and reports the detected CNI.
+`connect-plan` sends only GET to the real API, intercepts writes locally, and does
+not use SSH. Secret values are redacted. The plan is for review, not kubectl apply.
 
-### 4. Установить аддон
+### 4. Connect
+
+For persistent management:
 
 ```sh
-k8nnect addon-install --kubeconfig /secure/cluster.yaml --config /secure/connection.json
-kubectl --kubeconfig /secure/cluster.yaml -n k8nnect-system logs -f deployment/installer
-kubectl --kubeconfig /secure/cluster.yaml get node k8nnect-vds -o wide
+k0nnect addon-install --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system logs -f deployment/installer
+kubectl --kubeconfig /secure/cluster.yaml get node k0nnect-vds -o wide
 ```
 
-Для однократного подключения вместо аддона используйте `k8nnect connect` с теми
-же аргументами. Все команды также доступны как `kubectl k8nnect …`.
+For a one-off installation, use `k0nnect connect` with the same arguments.
+Commands are also available as `kubectl k0nnect …`. The addon was live-tested on
+Calico; the other CNI profiles were tested with the one-off CLI.
 
-## Команды
+## Commands
 
-| Команда | Результат |
+| Command | Effect |
 | --- | --- |
-| `connect-check` | Читающая проверка совместимости и SSH |
-| `connect-plan --output PATH` | Локальный план с удалёнными значениями секретов |
-| `connect` | Установка и подключение VDS с проверкой workloads |
-| `addon-install` | Установка непрерывно работающего аддона |
-| `verify-node` | Повторная проверка Pod, TCP/UDP, DNS, logs и exec |
-| `disconnect --drain` | Drain с учётом PDB, остановка Worker, очистка состояния CNI на VDS и удаление принадлежащего соединению |
+| `connect-check` | Read-only compatibility and pinned-SSH preflight |
+| `connect-plan --output PATH` | Local redacted installation plan |
+| `connect` | Install, enroll, and verify the server |
+| `addon-install` | Install the continuous connection manager |
+| `verify-node` | Repeat scheduling, TCP/UDP, DNS, logs, and exec checks |
+| `disconnect --drain` | Drain respecting PDBs and remove owned resources |
 
-Все команды принимают `--config PATH --kubeconfig PATH`. Без `--kubeconfig`
-используется ServiceAccount внутри кластера. Профиль статического kubeadm/Flannel
-с командами `plan`, `apply` и `agent` описан в [отдельном runbook](docs/runbook.md).
+Commands take `--config PATH --kubeconfig PATH`. Omitting kubeconfig uses an
+in-cluster ServiceAccount. The original static kubeadm/Flannel inventory commands
+remain documented in the [separate runbook](docs/runbook.md).
 
-## Проверено на живом стенде
+## Tested behavior
 
-На четырёх управляемых кластерах публичного облака (k0s 1.36.4: Calico, Flannel, Cilium,
-kube-router) VDS прошла подключение, `disconnect --drain` и повторное подключение.
-Каждый раз проверялись планирование Pod, TCP 64 КиБ и UDP 1000/1422/8192 байт в обе
-стороны со всеми исходными Workers, Service DNS, kubelet logs и exec.
-[Отчёт по матрице CNI](docs/cni-matrix-2026-10-30.md).
+Fresh enrollment, drain/disconnect, and re-enrollment passed on all four CNI
+profiles. Checks covered TCP 64 KiB and UDP 1000/1422/8192 bytes in both directions
+against every original worker, Service DNS/HTTP, logs, and exec. The first Calico
+lab also tested a worker without ExternalIP, addon reconciliation, and worker-service
+restart recovery. See [the full report and build qualifications](docs/cni-matrix-2026-10-30.md).
 
-Первый стенд с Calico дополнительно проверил три исходных Workers, включая Worker
-без ExternalIP, повторную сверку аддона и перезапуск установленных сервисов.
-[Подробный отчёт](docs/worker-enrollment-2026-10-30.md).
+These are historical tests before the rename. Host reboot, sustained load,
+NetworkPolicy, CSI, and cloud LoadBalancer behavior remain uncertified.
 
-Это результат для конкретных версий и настроек, а не сертификация любых кластеров.
-Полная перезагрузка VDS, отказ основного gateway, NetworkPolicy, CSI, длительная
-нагрузка и аддон на Flannel, Cilium и kube-router не проверены.
+## Permissions and credentials
 
-## Права и секреты
+Gateways use hostNetwork and NET_ADMIN. The addon stores SSH credentials in
+Secret `vds-ssh` and uses explicit RBAC, including bootstrap and checked serving-CSR
+approval. Administrator credentials are not copied to the server. Secret encryption
+at rest depends on the cluster. Read [permissions and limits](docs/addon.md).
 
-Gateway использует hostNetwork и NET_ADMIN. Аддон сохраняет SSH-креды в Kubernetes
-Secret `vds-ssh` и получает явный набор RBAC-прав, включая bootstrap и проверяемое
-одобрение kubelet-serving CSR. Административный kubeconfig на VDS не передаётся.
-Шифрование Secret на диске зависит от настроек кластера. Перед установкой
-прочитайте [границы прав и сетевые ограничения](docs/addon.md).
+## Upgrading from the previous name
 
-## Разработка
+The rename changes ownership labels, units, directories, and namespaces. Keep the
+old binary and configuration and use that version to drain and disconnect first.
+Then update your settings and install k0nnect. The new installer refuses detected
+legacy managed namespaces to avoid overlapping gateway networks. Existing live
+installations are not automatically migrated by a code or repository rename.
+
+## Development
 
 ```sh
 make check                         # go vet + race tests
-make site                          # статический сайт в site/
+make site                          # static output in site/
 python3 -m http.server 8080 --directory site
 ```
 
-Интеграционные тесты, изменяющие инфраструктуру, запускаются отдельно и только
-на подготовленном стенде: [test/integration](test/integration).
-Сайт собирается из `website/` и публикуется в GitHub Pages через Actions.
-Локальные секреты и исходные снимки стенда исключены из публикации.
+Integration scripts in [test/integration](test/integration) modify infrastructure
+and require an authorized lab. The English website is built from `website/` and
+published by GitHub Actions. Credentials and raw lab snapshots are excluded.

@@ -1,43 +1,35 @@
-# Права и секреты
+# Permissions and secrets
 
-k8nnect устанавливает привилегированную инфраструктуру. Это инструмент администратора кластера, а не граница изоляции между недоверенными арендаторами.
+k0nnect installs privileged infrastructure. It is an administrator tool, not an isolation boundary between untrusted tenants.
 
-## SSH и ключи
+## SSH and keys
 
-SSH-сервер проверяется по закреплённому SHA256 fingerprint до выполнения операций. Текущий проверенный профиль использует Ed25519. Несовпадение ключа останавливает подключение.
+The SSH host is checked against a pinned SHA256 fingerprint before remote operations. The tested preflight prefers Ed25519. A mismatch stops the connection.
 
-CLI читает пароль или private key из локального файла. Аддон копирует его в Secret `vds-ssh`, смонтированный с режимом `0400` в Pod установщика. Пароль не включается в публичный JSON соединения.
+The CLI reads a password or private key from a local file. The addon copies it into Secret `vds-ssh`, mounted with mode `0400` in the installer Pod. Credentials are not included inline in the public connection JSON.
 
-WireGuard-ключи генерируются на соответствующих хостах и хранятся root-only. В конфигурацию peers передаются только публичные ключи.
+WireGuard keys are generated on their owning hosts and stored root-only. Peer configuration uses public keys.
 
-## Данные Kubernetes
+## Kubernetes credentials
 
-Администраторский kubeconfig остаётся на рабочей машине. На VDS передаётся только worker bootstrap с доверенным CA и token со сроком один час. После успешного присоединения или ошибки попытки token отзывается; если отзыв недоступен, остаётся ограниченный срок действия.
+Your administrator kubeconfig stays on the workstation. The server receives a worker bootstrap document with a trusted CA and token expiring after one hour. The token is revoked after successful enrollment or a failed attempt; its expiry still applies if cleanup is unavailable.
 
-Kubernetes Secret не гарантирует шифрование на диске сам по себе. Защита etcd, encryption at rest и ограничения чтения Secret определяются конфигурацией кластера.
+A Kubernetes Secret does not itself guarantee encryption at rest. etcd protection, encryption settings, and access policy are the cluster administrator's responsibility.
 
-## Привилегии gateway
+## Gateway privileges
 
-Gateway Pod использует hostNetwork, NET_ADMIN и собственный hostPath для состояния. Он создаёт интерфейс и маршруты, добавляет помеченные правила forwarding/SNAT. Владение проверяется по alias интерфейса, меткам Kubernetes и маркеру установленного Worker.
+Gateway Pods use hostNetwork, NET_ADMIN, and a dedicated hostPath for state. They create owned interfaces and routes and add tagged forwarding/SNAT rules. Interface aliases, Kubernetes metadata, and the installed-worker marker protect ownership boundaries.
 
-Gateway-агент читает объект своей ноды и записывает в него аннотации с публичным ключом WireGuard и MTU интерфейса ноды. Права на ноды ограничены именами gateway-нод. Если Cilium работает с kube-proxy replacement, NodePort-сервис для gateway не создаётся, и порт не резервируется в Kubernetes.
+The installer does not migrate existing physical addresses or take over CNI Pod routes.
 
-Нет автоматического изменения адресов существующих физических интерфейсов и нет переписывания Pod-маршрутов или настроек CNI.
+## Installer RBAC
 
-## Что скачивается на VDS
+The addon uses explicit roles instead of cluster-admin. It needs compatibility reads, Node patches, owned workload management, gateway RBAC, bootstrap Secret creation, and checked kubelet-serving CSR approval.
 
-Релиз k0s загружается с GitHub и сверяется с `sha256sums.txt` того же релиза. Стандартные CNI-плагины containernetworking/plugins ставятся, только если их нет, из релиза с sha256, закреплённым в коде; существующие файлы не заменяются. Пакеты WireGuard, iptables и curl ставятся из apt-репозиториев VDS.
+Bootstrap Secret read/delete is scoped to the connection's deterministic token name. Kubernetes cannot restrict Secret **create** with `resourceNames`, so create permission in kube-system remains broader.
 
-`disconnect` завершает оставшиеся containerd-shim k0s и удаляет на VDS локальное состояние CNI удалённой ноды: `/etc/cni/net.d`, `/var/lib/cni`, `/run/flannel` и состояние Calico, Cilium и kube-router. Установщик принимает только VDS без чужой установки k0s; не подключайте сервер, где эти каталоги использует другое ПО.
+Serving CSR checks include the requestor, signer, signature, CN, organization, and IP/DNS SANs. Approving arbitrary certificate requests is not part of the algorithm.
 
-## RBAC установщика
+## Operational boundary
 
-Аддон использует явные роли вместо cluster-admin. Среди необходимых возможностей — чтение совместимости, patch Nodes, управление собственными workload-ресурсами и gateway RBAC, создание bootstrap Secret и проверяемое одобрение kubelet-serving CSR.
-
-Чтение и удаление bootstrap Secret ограничены именем token данного соединения. Kubernetes RBAC не умеет ограничивать **создание** Secret через `resourceNames`, поэтому create в kube-system остаётся более широким правом.
-
-Для serving CSR проверяются requestor, signer, подпись запроса, CN, organization, DNS и IP SAN. Одобрение произвольных CSR не является частью алгоритма.
-
-## Граница обещаний
-
-Проверки владения и ограниченный bootstrap уменьшают риск ошибки, но не превращают root SSH и NET_ADMIN в непривилегированные операции. Изменения сети не являются атомарной транзакцией при падении хоста. План установки и восстановление нужно оценивать до запуска на важном кластере.
+Ownership checks and expiring credentials reduce mistakes, but root SSH and NET_ADMIN remain privileged access. Network changes are not a crash-proof distributed transaction. Review the connection plan and recovery procedure before using an important cluster.

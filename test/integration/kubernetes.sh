@@ -6,7 +6,7 @@ if [[ $# != 2 || ! $1 =~ ^[a-z0-9][a-z0-9.-]*$ || ! $2 =~ ^[a-z0-9][a-z0-9.-]*$ 
   exit 2
 fi
 command -v kubectl >/dev/null
-task_namespace="k8nnect-e2e-$(date +%s)-$$"
+task_namespace="k0nnect-e2e-$(date +%s)-$$"
 kubectl create namespace "$task_namespace"
 cleanup() { kubectl delete namespace "$task_namespace" --wait=false; }
 trap cleanup EXIT
@@ -19,7 +19,7 @@ kind: Pod
 metadata:
   name: $task_name
   labels:
-    app: k8nnect-e2e
+    app: k0nnect-e2e
 spec:
   nodeName: $task_node
   containers:
@@ -40,7 +40,7 @@ metadata:
   name: remote
 spec:
   selector:
-    app: k8nnect-e2e
+    app: k0nnect-e2e
     target: remote
   ports:
     - port: 8080

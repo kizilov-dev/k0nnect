@@ -14,21 +14,21 @@ import (
 	"syscall"
 	"time"
 
-	"k8nnect/internal/bootstrap/kubeadm"
-	"k8nnect/internal/cni"
-	"k8nnect/internal/enroll"
-	"k8nnect/internal/kube"
-	"k8nnect/internal/model"
-	linux "k8nnect/internal/network/linux"
-	"k8nnect/internal/planner"
-	"k8nnect/internal/transport/wireguard"
+	"k0nnect/internal/bootstrap/kubeadm"
+	"k0nnect/internal/cni"
+	"k0nnect/internal/enroll"
+	"k0nnect/internal/kube"
+	"k0nnect/internal/model"
+	linux "k0nnect/internal/network/linux"
+	"k0nnect/internal/planner"
+	"k0nnect/internal/transport/wireguard"
 )
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "k8nnect:", err)
+		fmt.Fprintln(os.Stderr, "k0nnect:", err)
 		os.Exit(1)
 	}
 }
@@ -40,7 +40,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		}
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: k8nnect <connect-check|connect-plan|connect|addon-install|verify-node|disconnect> --config connection.json --kubeconfig PATH; static profile: <plan|doctor|apply|agent|status|verify|remove|join-config> --config inventory.json --node NAME")
+		return fmt.Errorf("usage: k0nnect <connect-check|connect-plan|connect|addon-install|verify-node|disconnect> --config connection.json --kubeconfig PATH; static profile: <plan|doctor|apply|agent|status|verify|remove|join-config> --config inventory.json --node NAME")
 	}
 	f := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	config := f.String("config", "", "inventory JSON file")
@@ -294,7 +294,7 @@ func enrollmentCommand(ctx context.Context, args []string, out io.Writer) error 
 }
 
 func lock() (func(), error) {
-	const dir = "/run/k8nnect"
+	const dir = "/run/k0nnect"
 	if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
 		return nil, err
 	}
@@ -313,7 +313,7 @@ func lock() (func(), error) {
 	file := os.NewFile(uintptr(fd), "network.lock")
 	if err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		file.Close()
-		return nil, fmt.Errorf("another k8nnect operation is active: %w", err)
+		return nil, fmt.Errorf("another k0nnect operation is active: %w", err)
 	}
 	closed := false
 	return func() {

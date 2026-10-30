@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"k8nnect/internal/kube"
+	"k0nnect/internal/kube"
 )
 
 func TestEnsureNamespaceWaitsForTermination(t *testing.T) {
@@ -17,7 +17,7 @@ func TestEnsureNamespaceWaitsForTermination(t *testing.T) {
 			gets++
 			if gets == 1 {
 				// Left over by a just-finished disconnect.
-				return response(200, kube.Object{"metadata": kube.Object{"name": c.Namespace, "deletionTimestamp": "2026-10-30T12:00:00Z", "annotations": kube.Object{"k8nnect.io/connection": c.Name}}}), nil
+				return response(200, kube.Object{"metadata": kube.Object{"name": c.Namespace, "deletionTimestamp": "2026-10-30T12:00:00Z", "annotations": kube.Object{"k0nnect.io/connection": c.Name}}}), nil
 			}
 			return response(404, kube.Object{}), nil
 		case r.Method == "POST" && r.URL.Path == "/api/v1/namespaces":

@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"k8nnect/internal/kube"
-	"k8nnect/internal/model"
-	linux "k8nnect/internal/network/linux"
+	"k0nnect/internal/kube"
+	"k0nnect/internal/model"
+	linux "k0nnect/internal/network/linux"
 )
 
-const WorkerNS = "k8nnect"
-const GatewayInterface = "k8ngw0"
+const WorkerNS = "k0nnect"
+const GatewayInterface = "k0ngw0"
 
 func command(ctx context.Context, p string, args ...string) ([]byte, error) {
 	return (linux.ExecRunner{}).Run(ctx, p, args, nil)
@@ -153,7 +153,7 @@ func syncWG(ctx context.Context, ns, iface string, config []byte) error {
 	return nil
 }
 func ensureGateway(ctx context.Context, n Network, key string) error {
-	owner := "k8nnect:gateway:" + n.Name
+	owner := "k0nnect:gateway:" + n.Name
 	exists, e := linkExists(ctx, "", GatewayInterface, owner)
 	if e != nil {
 		return e
@@ -210,7 +210,7 @@ func ensureGateway(ctx context.Context, n Network, key string) error {
 	if strings.TrimSpace(string(forwarding)) != "1" {
 		return fmt.Errorf("gateway requires existing IPv4 forwarding enabled by the CNI")
 	}
-	ownerComment := "k8nnect:" + n.Name
+	ownerComment := "k0nnect:" + n.Name
 	rules := [][]string{
 		{"-t", "nat", "POSTROUTING", "-s", n.WorkerAddress + "/32", "!", "-o", GatewayInterface, "-m", "comment", "--comment", ownerComment, "-j", "MASQUERADE"},
 		{"-t", "filter", "FORWARD", "-i", GatewayInterface, "-s", n.WorkerAddress + "/32", "-m", "comment", "--comment", ownerComment, "-j", "ACCEPT"},
@@ -235,7 +235,7 @@ func EnsureWorker(ctx context.Context, path string) error {
 	if len(n.Peers) == 0 {
 		return fmt.Errorf("no gateways")
 	}
-	key, e := privateKey(ctx, "/etc/k8nnect/worker.key")
+	key, e := privateKey(ctx, "/etc/k0nnect/worker.key")
 	if e != nil {
 		return e
 	}
@@ -251,7 +251,7 @@ func EnsureWorker(ctx context.Context, path string) error {
 			return e
 		}
 	}
-	owner := "k8nnect:worker:" + n.Name
+	owner := "k0nnect:worker:" + n.Name
 	exists, e := linkExists(ctx, WorkerNS, "eth1", owner)
 	if e != nil {
 		return e
@@ -259,7 +259,7 @@ func EnsureWorker(ctx context.Context, path string) error {
 	if !exists {
 		// The UDP socket must be born in the host namespace. WireGuard retains that
 		// socket after moving the interface; outer packets use the physical network.
-		tmp := "k8nworker0"
+		tmp := "k0nworker0"
 		existing, e := linkExists(ctx, "", tmp, owner)
 		if e != nil {
 			return e
@@ -319,7 +319,7 @@ func workerConfiguration(n Network, key string) []byte {
 }
 
 // NodeMTUAnnotation publishes the MTU of the interface carrying a gateway's InternalIP.
-const NodeMTUAnnotation = "k8nnect.io/node-mtu"
+const NodeMTUAnnotation = "k0nnect.io/node-mtu"
 
 func addressMTU(ctx context.Context, ip string) (int, error) {
 	b, e := command(ctx, "ip", "-j", "-4", "address", "show")
@@ -386,7 +386,7 @@ func Agent(ctx context.Context, kind, path string) error {
 	if e != nil {
 		return e
 	}
-	if _, e = c.Do(ctx, "PATCH", "/api/v1/nodes/"+node, kube.Object{"metadata": kube.Object{"annotations": kube.Object{"k8nnect.io/wireguard-public-key": pub, NodeMTUAnnotation: strconv.Itoa(mtu)}}}); e != nil {
+	if _, e = c.Do(ctx, "PATCH", "/api/v1/nodes/"+node, kube.Object{"metadata": kube.Object{"annotations": kube.Object{"k0nnect.io/wireguard-public-key": pub, NodeMTUAnnotation: strconv.Itoa(mtu)}}}); e != nil {
 		return e
 	}
 	for {
@@ -402,10 +402,10 @@ func Agent(ctx context.Context, kind, path string) error {
 			}
 		}
 		if e != nil {
-			os.Remove("/tmp/k8nnect-ready")
+			os.Remove("/tmp/k0nnect-ready")
 			fmt.Fprintln(os.Stderr, "gateway network reconcile:", e)
 		} else {
-			os.WriteFile("/tmp/k8nnect-ready", []byte("ready\n"), 0600)
+			os.WriteFile("/tmp/k0nnect-ready", []byte("ready\n"), 0600)
 			fmt.Println("Gateway network configured")
 		}
 		select {
