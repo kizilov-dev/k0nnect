@@ -1,0 +1,15 @@
+/bin/
+*.key
+join.json
+inventory.local.json
+__pycache__/
+/local-reports/
+/site/
+*.local.json
+*.local.yaml
+*.local.yml
+kubeconfig*
+.env
+.env.*
+*.pem
+*.token

@@ -1,0 +1,14 @@
+{
+  "name": "external-worker",
+  "nodeName": "k8nnect-vds",
+  "namespace": "k8nnect-system",
+  "host": "203.0.113.10",
+  "user": "root",
+  "sshPort": 22,
+  "passwordFile": "/secure/vds-password",
+  "hostKeySHA256": "SHA256:REPLACE_WITH_VERIFIED_ED25519_FINGERPRINT",
+  "transportCIDR": "10.203.74.0/24",
+  "workerAddress": "10.203.74.100",
+  "port": 31820,
+  "mtu": 1400
+}

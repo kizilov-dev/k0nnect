@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "mode": "cluster-extension",
+  "cluster": "lab",
+  "transport": {
+    "driver": "wireguard",
+    "interface": "k8n0",
+    "cidr": "10.203.0.0/24",
+    "mtu": 1400,
+    "pathMTU": 1500
+  },
+  "kubernetes": {
+    "distribution": "kubeadm",
+    "apiServer": "10.203.0.1:6443",
+    "podCIDR": "10.244.0.0/16",
+    "serviceCIDR": "10.96.0.0/12",
+    "cni": {
+      "name": "flannel",
+      "backend": "vxlan",
+      "directRouting": false
+    }
+  },
+  "nodes": [
+    {
+      "name": "control-plane",
+      "address": "10.203.0.1",
+      "endpoint": "192.0.2.10:51820",
+      "wireguard": {
+        "publicKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        "privateKeyFile": "/etc/k8nnect/node.key"
+      }
+    },
+    {
+      "name": "remote-worker",
+      "address": "10.203.0.2",
+      "endpoint": "198.51.100.20:51820",
+      "wireguard": {
+        "publicKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+        "privateKeyFile": "/etc/k8nnect/node.key"
+      }
+    }
+  ]
+}

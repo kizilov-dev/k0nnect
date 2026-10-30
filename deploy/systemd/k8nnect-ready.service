@@ -1,0 +1,21 @@
+[Unit]
+Description=Configure k8nnect encrypted node network
+Wants=network-online.target
+After=network-online.target
+Before=kubelet.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/k8nnect/node.env
+ExecStart=/usr/local/bin/k8nnect apply --config /etc/k8nnect/inventory.json --node ${K8NNECT_NODE}
+RemainAfterExit=yes
+User=root
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/run
+CapabilityBoundingSet=CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
