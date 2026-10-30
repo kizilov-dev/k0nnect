@@ -28,6 +28,9 @@ func cniCluster(objects map[string]kube.Object) *kube.Client {
 		if obj, ok := objects[r.URL.Path]; ok {
 			return response(200, obj), nil
 		}
+		if r.URL.Path == nodesPath {
+			return response(200, kube.Object{"items": []any{}}), nil
+		}
 		return response(404, kube.Object{}), nil
 	})
 	return &kube.Client{Server: "https://example.test", HTTP: &http.Client{Transport: rt}}
@@ -42,6 +45,16 @@ const (
 	ciliumCfg    = "/api/v1/namespaces/kube-system/configmaps/cilium-config"
 	kubeRouterDS = "/apis/apps/v1/namespaces/kube-system/daemonsets/kube-router"
 )
+
+const nodesPath = "/api/v1/nodes"
+
+func nodePodCIDRs(cidrs ...string) kube.Object {
+	items := []any{}
+	for _, c := range cidrs {
+		items = append(items, kube.Object{"spec": kube.Object{"podCIDR": c, "podCIDRs": []any{c}}})
+	}
+	return kube.Object{"items": items}
+}
 
 func flannelConf(conf string) kube.Object {
 	return kube.Object{"data": kube.Object{"net-conf.json": conf}}
@@ -84,6 +97,9 @@ func TestDetectCNI(t *testing.T) {
 		{"kube-router", map[string]kube.Object{kubeRouterDS: daemonSet(routerArgs, nil)}, CNIKubeRouter, ""},
 		{"kube-router without overlay", map[string]kube.Object{kubeRouterDS: daemonSet(append(routerArgs, "--enable-overlay=false"), nil)}, CNIKubeRouter, "overlay"},
 		{"kube-router route reflector", map[string]kube.Object{kubeRouterDS: daemonSet(append(routerArgs, "--nodes-full-mesh=false"), nil)}, CNIKubeRouter, "BGP"},
+		{"kube-router pod CIDR overlap", map[string]kube.Object{kubeRouterDS: daemonSet(routerArgs, nil), nodesPath: nodePodCIDRs("10.244.0.0/24", "10.203.74.0/24")}, CNIKubeRouter, "overlaps"},
+		{"cilium kubernetes IPAM overlap", map[string]kube.Object{ciliumDS: daemonSet(nil, nil), ciliumCfg: ciliumConf(map[string]string{"ipam": "kubernetes", "cluster-pool-ipv4-cidr": ""}), nodesPath: nodePodCIDRs("10.203.0.0/16")}, CNICilium, "overlaps"},
+		{"cilium kubernetes IPAM", map[string]kube.Object{ciliumDS: daemonSet(nil, nil), ciliumCfg: ciliumConf(map[string]string{"ipam": "kubernetes", "cluster-pool-ipv4-cidr": ""}), nodesPath: nodePodCIDRs("10.244.0.0/24")}, CNICilium, ""},
 		{"unknown", map[string]kube.Object{}, "", "no supported CNI"},
 	}
 	for _, tc := range cases {

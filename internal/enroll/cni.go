@@ -67,7 +67,9 @@ func detectCNI(ctx context.Context, k *kube.Client, network netip.Prefix) (cniPr
 		case CNICilium:
 			profile.HostPortOnly, e = checkCilium(ctx, k, network)
 		case CNIKubeRouter:
-			e = checkKubeRouter(ds)
+			if e = checkKubeRouter(ds); e == nil {
+				e = checkNodePodCIDRs(ctx, k, network, "kube-router")
+			}
 		}
 		return profile, e
 	}
@@ -126,6 +128,30 @@ func checkPodNetwork(cidr string, network netip.Prefix, what string) error {
 	}
 	if p.Overlaps(network) {
 		return fmt.Errorf("transport CIDR overlaps %s Pod network %s", what, cidr)
+	}
+	return nil
+}
+
+// checkNodePodCIDRs validates CNIs whose Pod subnets are the Nodes' podCIDRs.
+func checkNodePodCIDRs(ctx context.Context, k *kube.Client, network netip.Prefix, what string) error {
+	nodes, e := k.Get(ctx, "/api/v1/nodes")
+	if e != nil {
+		return e
+	}
+	for _, v := range kube.Items(nodes, "items") {
+		spec := kube.Map(kube.As(v), "spec")
+		cidrs := kube.Items(spec, "podCIDRs")
+		if len(cidrs) == 0 && kube.Str(spec, "podCIDR") != "" {
+			cidrs = []any{kube.Str(spec, "podCIDR")}
+		}
+		for _, c := range cidrs {
+			if p, err := netip.ParsePrefix(fmt.Sprint(c)); err == nil && !p.Addr().Is4() {
+				continue
+			}
+			if e = checkPodNetwork(fmt.Sprint(c), network, what); e != nil {
+				return e
+			}
+		}
 	}
 	return nil
 }
@@ -211,8 +237,14 @@ func checkCilium(ctx context.Context, k *kube.Client, network netip.Prefix) (boo
 	if kube.Str(data, "enable-ipv4") != "true" {
 		return false, fmt.Errorf("requires Cilium IPv4")
 	}
-	if ipam := kube.Str(data, "ipam"); ipam != "cluster-pool" && ipam != "kubernetes" {
+	ipam := kube.Str(data, "ipam")
+	if ipam != "cluster-pool" && ipam != "kubernetes" {
 		return false, fmt.Errorf("unsupported Cilium IPAM mode %q", ipam)
+	}
+	if ipam == "kubernetes" {
+		if e = checkNodePodCIDRs(ctx, k, network, "Cilium"); e != nil {
+			return false, e
+		}
 	}
 	if cidr := kube.Str(data, "cluster-pool-ipv4-cidr"); cidr != "" {
 		for _, c := range strings.Fields(strings.ReplaceAll(cidr, ",", " ")) {
