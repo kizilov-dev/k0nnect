@@ -9,7 +9,7 @@
 Подключение внешней VDS как полноценного Worker через SSH и WireGuard.
 CLI для установки, аддон для поддержания соединения.
 
-[Сайт](https://kizilov-dev.github.io/k8nnect/) · [Быстрый старт](#быстрый-старт) · [Документация](https://kizilov-dev.github.io/k8nnect/docs/) · [Архитектура](docs/architecture.md) · [Результаты испытаний](docs/worker-enrollment-2026-10-30.md)
+[Сайт](https://kizilov-dev.github.io/k8nnect/) · [Быстрый старт](#быстрый-старт) · [Документация](https://kizilov-dev.github.io/k8nnect/docs/) · [Архитектура](docs/architecture.md) · [Результаты испытаний](docs/cni-matrix-2026-10-30.md)
 
 </div>
 
@@ -27,8 +27,9 @@ k8nnect устанавливает ПО на внешнем Linux-сервере
 
 ## Что делает утилита
 
-- Проверяет совместимость кластера и закреплённый SSH-ключ VDS.
-- Устанавливает WireGuard, k0s worker и systemd-сервисы.
+- Определяет CNI кластера, проверяет совместимость его настроек и закреплённый SSH-ключ VDS.
+- Устанавливает WireGuard, k0s worker и systemd-сервисы; недостающие стандартные
+  CNI-плагины ставит из закреплённого по sha256 релиза.
 - Запускает gateway-агенты на существующих Workers.
 - Регистрирует ноду через краткоживущий bootstrap token, затем отзывает его.
 - Проверяет планирование, TCP/UDP с каждым существующим Ready Worker, Service DNS, logs и exec.
@@ -43,7 +44,7 @@ k8nnect устанавливает ПО на внешнем Linux-сервере
 | Компонент | Поддерживаемая конфигурация |
 | --- | --- |
 | Кластер | k0s, Linux/amd64 Workers, одинаковая minor-версия Kubernetes |
-| CNI | IPv4 с инкапсуляцией и выбором адреса ноды по `eth1`: Calico VXLAN, Flannel VXLAN, Cilium tunnel или kube-router с overlay — [подробно](website/content/compatibility.md) |
+| CNI | IPv4 с инкапсуляцией и выбором адреса ноды по `eth1`: Calico VXLAN, Flannel VXLAN, Cilium tunnel или kube-router с overlay — [подробно](https://kizilov-dev.github.io/k8nnect/docs/compatibility/) |
 | VDS | Linux/amd64, root SSH, systemd, apt, Python 3, поддержка WireGuard в ядре |
 | Доступ | kubeconfig с правами установки RBAC, gateway-агентов и worker bootstrap |
 | Сеть | Непересекающаяся приватная /24, UDP к gateway и VDS, доступ к пакетам и образам |
@@ -73,6 +74,7 @@ export PATH="$PWD/bin:$PATH"
 `0600`. Не храните пароль в JSON. Адрес `203.0.113.10` в примере — заглушка.
 
 ```sh
+install -d -m 700 /secure
 cp examples/connection.json /secure/connection.json
 chmod 600 /secure/connection.json
 ```
@@ -85,7 +87,8 @@ k8nnect connect-plan --kubeconfig /secure/cluster.yaml --config /secure/connecti
   --output /secure/connect-review.json
 ```
 
-`connect-check` читает состояние API и VDS через SSH. `connect-plan` создаёт
+`connect-check` читает состояние API и VDS через SSH; поле `cni` в выводе показывает
+определённый CNI, а несовместимая настройка CNI называется в ошибке. `connect-plan` создаёт
 обезличенный план локально, отправляет только GET в реальный API и не использует
 SSH. План предназначен для ревью, а не для `kubectl apply`.
 
@@ -109,7 +112,7 @@ kubectl --kubeconfig /secure/cluster.yaml get node k8nnect-vds -o wide
 | `connect` | Установка и подключение VDS с проверкой workloads |
 | `addon-install` | Установка непрерывно работающего аддона |
 | `verify-node` | Повторная проверка Pod, TCP/UDP, DNS, logs и exec |
-| `disconnect --drain` | Drain с учётом PDB и удаление принадлежащего соединению |
+| `disconnect --drain` | Drain с учётом PDB, остановка Worker, очистка состояния CNI на VDS и удаление принадлежащего соединению |
 
 Все команды принимают `--config PATH --kubeconfig PATH`. Без `--kubeconfig`
 используется ServiceAccount внутри кластера. Профиль статического kubeadm/Flannel
@@ -127,8 +130,9 @@ kube-router) VDS прошла подключение, `disconnect --drain` и п
 без ExternalIP, повторную сверку аддона и перезапуск установленных сервисов.
 [Подробный отчёт](docs/worker-enrollment-2026-10-30.md).
 
-Это результат для конкретного профиля, а не сертификация любых кластеров.
-Полная перезагрузка VDS, NetworkPolicy, CSI и длительная нагрузка не проверены.
+Это результат для конкретных версий и настроек, а не сертификация любых кластеров.
+Полная перезагрузка VDS, отказ основного gateway, NetworkPolicy, CSI, длительная
+нагрузка и аддон на Flannel, Cilium и kube-router не проверены.
 
 ## Права и секреты
 
