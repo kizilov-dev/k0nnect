@@ -88,7 +88,7 @@ func discover(ctx context.Context, k *kube.Client, c *Config) ([]Peer, kube.Obje
 		if external != "" {
 			endpoint = fmt.Sprintf("%s:%d", external, c.Port)
 		}
-		peers = append(peers, Peer{Name: name, InternalIP: internal, Endpoint: endpoint, PublicKey: kube.Str(kube.Map(meta, "annotations"), "k0nnect.io/wireguard-public-key")})
+		peers = append(peers, Peer{Name: name, InternalIP: internal, Endpoint: endpoint})
 	}
 	if len(peers) == 0 || len(peers) > 99 {
 		return nil, nil, "", fmt.Errorf("need 1..99 ready gateway workers")
@@ -216,14 +216,15 @@ func Connect(ctx context.Context, k *kube.Client, c Config, out io.Writer) error
 				}
 			}
 		}
+		state, e := k.Get(ctx, "/api/v1/namespaces/"+c.Namespace+"/configmaps/"+GatewayState)
+		if e != nil {
+			return e
+		}
+		published := kube.Map(state, "data")
 		for i := range peers {
-			n, e := k.Get(ctx, "/api/v1/nodes/"+peers[i].Name)
-			if e != nil {
-				return e
-			}
-			annotations := kube.Map(kube.Map(n, "metadata"), "annotations")
-			peers[i].PublicKey = kube.Str(annotations, "k0nnect.io/wireguard-public-key")
-			mtu, err := strconv.Atoi(kube.Str(annotations, NodeMTUAnnotation))
+			keyField, mtuField := gatewayStateKeys(peers[i].Name)
+			peers[i].PublicKey = kube.Str(published, keyField)
+			mtu, err := strconv.Atoi(kube.Str(published, mtuField))
 			if peers[i].PublicKey == "" || err != nil || !readyNodes[peers[i].Name] {
 				ready = false
 			} else if nodeMTU == 0 || mtu < nodeMTU {

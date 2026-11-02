@@ -14,7 +14,7 @@ The WireGuard device is created in the host network and then moved into the work
 
 A DaemonSet runs gateway agents with hostNetwork and NET_ADMIN. Each owns `k0ngw0`, a /32 route to the external worker, and comment-tagged iptables rules.
 
-The primary gateway provides access from the worker namespace to the private API, konnectivity, and external networks. Forwarded traffic from the worker transport address is masqueraded when it leaves another interface. Specific original node addresses are routed through their corresponding WireGuard peers so CNI-encapsulated packets reach the correct node.
+The primary gateway provides access from the worker namespace to the private API, konnectivity, and external networks. Forwarded traffic from the worker transport address is masqueraded when it leaves another interface; link-local destinations such as cloud metadata are dropped. Specific original node addresses are routed through their corresponding WireGuard peers so CNI-encapsulated packets reach the correct node.
 
 A worker without a public address initiates a connection to the external server. WireGuard learns its endpoint from authenticated traffic. Public gateways are preferred when selecting the primary; there is no automatic failover.
 

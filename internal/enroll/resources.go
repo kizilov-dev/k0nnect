@@ -92,11 +92,15 @@ func gatewayResources(ctx context.Context, k *kube.Client, c Config, networks ma
 	if e := applyOwned(ctx, k, c, ns+"/configmaps", "gateway-network", kube.Object{"apiVersion": "v1", "kind": "ConfigMap", "metadata": kube.Object{"name": "gateway-network", "namespace": c.Namespace}, "data": data}); e != nil {
 		return e
 	}
+	// Created without data: merge patches on reconcile keep what agents published.
+	if e := applyOwned(ctx, k, c, ns+"/configmaps", GatewayState, kube.Object{"apiVersion": "v1", "kind": "ConfigMap", "metadata": kube.Object{"name": GatewayState, "namespace": c.Namespace}}); e != nil {
+		return e
+	}
 	if e := applyOwned(ctx, k, c, ns+"/serviceaccounts", "gateway", kube.Object{"apiVersion": "v1", "kind": "ServiceAccount", "metadata": kube.Object{"name": "gateway", "namespace": c.Namespace}}); e != nil {
 		return e
 	}
-	role := c.Namespace + "-gateway"
-	cr := kube.Object{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": kube.Object{"name": role}, "rules": []any{kube.Object{"apiGroups": []string{""}, "resources": []string{"nodes"}, "resourceNames": nodes, "verbs": []string{"get", "patch"}}}}
+	role := gatewayRole(c)
+	cr := kube.Object{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": kube.Object{"name": role}, "rules": []any{kube.Object{"apiGroups": []string{""}, "resources": []string{"nodes"}, "resourceNames": nodes, "verbs": []string{"get"}}}}
 	if e := applyOwned(ctx, k, c, "/apis/rbac.authorization.k8s.io/v1/clusterroles", role, cr); e != nil {
 		return e
 	}
@@ -104,7 +108,7 @@ func gatewayResources(ctx context.Context, k *kube.Client, c Config, networks ma
 	if e := applyOwned(ctx, k, c, "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", role, binding); e != nil {
 		return e
 	}
-	readRole := kube.Object{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": kube.Object{"name": "gateway-config", "namespace": c.Namespace}, "rules": []any{kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{"gateway-network"}, "verbs": []string{"get"}}}}
+	readRole := kube.Object{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": kube.Object{"name": "gateway-config", "namespace": c.Namespace}, "rules": []any{kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{"gateway-network"}, "verbs": []string{"get"}}, kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{GatewayState}, "verbs": []string{"get", "patch"}}}}
 	if e := applyOwned(ctx, k, c, "/apis/rbac.authorization.k8s.io/v1/namespaces/"+c.Namespace+"/roles", "gateway-config", readRole); e != nil {
 		return e
 	}

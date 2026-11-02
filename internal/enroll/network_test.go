@@ -25,3 +25,24 @@ func TestValidateNetworkNodeMTU(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayRulesBlockLinkLocal(t *testing.T) {
+	n := Network{Name: "test-vds", WorkerAddress: "10.203.74.100"}
+	var accept, drop bool
+	for _, r := range gatewayRules(n) {
+		rule := strings.Join(r, " ")
+		if strings.Contains(rule, "FORWARD -i "+GatewayInterface) {
+			accept = accept || strings.Contains(rule, "! -d "+LinkLocal) && strings.HasSuffix(rule, "-j ACCEPT")
+			drop = drop || strings.Contains(rule, " -d "+LinkLocal) && !strings.Contains(rule, "!") && strings.HasSuffix(rule, "-j DROP")
+			if strings.HasSuffix(rule, "-j ACCEPT") && !strings.Contains(rule, "! -d "+LinkLocal) {
+				t.Fatalf("Worker traffic accepted towards link-local: %s", rule)
+			}
+		}
+	}
+	if !accept || !drop {
+		t.Fatalf("forwarding rules do not exclude and drop link-local: accept=%v drop=%v", accept, drop)
+	}
+	if strings.Contains(strings.Join(legacyGatewayRules(n)[0], " "), LinkLocal) {
+		t.Fatal("legacy rule must be the unrestricted accept it replaces")
+	}
+}

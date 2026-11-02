@@ -62,6 +62,14 @@ func issueToken(ctx context.Context, k *kube.Client, c Config) (string, string, 
 	encoded, e := BootstrapDocument(k.Server, k.CA, id+"."+secret)
 	return name, encoded, e
 }
+
+// Names of the cluster objects an installer manages; its RBAC is scoped to them.
+func profileConfigMap(c Config, minor string) string {
+	return "worker-config-k0nnect-" + c.Name + "-" + minor
+}
+func workerProfileRole(c Config) string { return c.Namespace + "-worker-profile" }
+func gatewayRole(c Config) string       { return c.Namespace + "-gateway" }
+
 func workerProfile(ctx context.Context, k *kube.Client, c Config, source kube.Object, minor string) (string, error) {
 	name := "k0nnect-" + c.Name
 	data := kube.Map(source, "data")
@@ -82,11 +90,11 @@ func workerProfile(ctx context.Context, k *kube.Client, c Config, source kube.Ob
 		return "", e
 	}
 	copyData["kubeletConfiguration"] = string(b)
-	cm := fmt.Sprintf("worker-config-%s-%s", name, minor)
+	cm := profileConfigMap(c, minor)
 	// k0s grants its generated profiles by explicit ConfigMap name. A cloned
 	// profile needs its own bounded grant for bootstrap and the resulting node.
 	rbac := "/apis/rbac.authorization.k8s.io/v1/namespaces/kube-system"
-	roleName := c.Namespace + "-worker-profile"
+	roleName := workerProfileRole(c)
 	role := kube.Object{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": kube.Object{"name": roleName, "namespace": "kube-system"}, "rules": []any{kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{cm}, "verbs": []string{"get", "list", "watch"}}}}
 	if e := applyOwned(ctx, k, c, rbac+"/roles", roleName, role); e != nil {
 		return "", e

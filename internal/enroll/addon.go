@@ -64,7 +64,8 @@ func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 	}
 	role := c.Namespace + "-installer"
 	rules := []any{
-		kube.Object{"apiGroups": []string{""}, "resources": []string{"nodes"}, "verbs": []string{"get", "list", "patch"}},
+		kube.Object{"apiGroups": []string{""}, "resources": []string{"nodes"}, "verbs": []string{"get", "list"}},
+		kube.Object{"apiGroups": []string{""}, "resources": []string{"nodes"}, "resourceNames": []string{c.NodeName}, "verbs": []string{"patch"}},
 		kube.Object{"apiGroups": []string{""}, "resources": []string{"namespaces", "services"}, "verbs": []string{"get", "list"}},
 		kube.Object{"apiGroups": []string{"apps"}, "resources": []string{"daemonsets"}, "verbs": []string{"get"}},
 		kube.Object{"apiGroups": []string{"crd.projectcalico.org"}, "resources": []string{"ippools"}, "verbs": []string{"get", "list"}},
@@ -72,7 +73,8 @@ func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 		kube.Object{"apiGroups": []string{"certificates.k8s.io"}, "resources": []string{"certificatesigningrequests"}, "verbs": []string{"get", "list"}},
 		kube.Object{"apiGroups": []string{"certificates.k8s.io"}, "resources": []string{"certificatesigningrequests/approval"}, "verbs": []string{"update"}},
 		kube.Object{"apiGroups": []string{"certificates.k8s.io"}, "resources": []string{"signers"}, "resourceNames": []string{"kubernetes.io/kubelet-serving"}, "verbs": []string{"approve"}},
-		kube.Object{"apiGroups": []string{"rbac.authorization.k8s.io"}, "resources": []string{"clusterroles", "clusterrolebindings"}, "verbs": []string{"get", "create", "patch"}},
+		kube.Object{"apiGroups": []string{"rbac.authorization.k8s.io"}, "resources": []string{"clusterroles", "clusterrolebindings"}, "verbs": []string{"create"}},
+		kube.Object{"apiGroups": []string{"rbac.authorization.k8s.io"}, "resources": []string{"clusterroles", "clusterrolebindings"}, "resourceNames": []string{gatewayRole(c)}, "verbs": []string{"get", "patch"}},
 	}
 	if e = applyOwned(ctx, k, c, "/apis/rbac.authorization.k8s.io/v1/clusterroles", role, kube.Object{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": kube.Object{"name": role}, "rules": rules}); e != nil {
 		return e
@@ -85,15 +87,18 @@ func InstallAddon(ctx context.Context, k *kube.Client, c Config, out io.Writer) 
 	if e = applyOwned(ctx, k, c, "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", role, crb); e != nil {
 		return e
 	}
-	// Resource creation cannot be restricted by resourceNames in Kubernetes RBAC.
-	// Reads/deletes of bootstrap secrets are restricted to this connection's token.
+	// Resource creation cannot be restricted by resourceNames in Kubernetes RBAC;
+	// every read, update and delete is limited to the objects this connection owns.
+	minor := minorVersion(c.K0sVersion)
 	for _, namespace := range []string{c.Namespace, "kube-system"} {
 		var r []any
 		if namespace == "kube-system" {
 			r = []any{
-				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{"worker-config-k0nnect-" + c.Name + "-" + minorVersion(c.K0sVersion)}, "verbs": []string{"list", "watch"}},
-				kube.Object{"apiGroups": []string{"rbac.authorization.k8s.io"}, "resources": []string{"roles", "rolebindings"}, "verbs": []string{"get", "create", "patch"}},
-				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "verbs": []string{"get", "create", "patch"}},
+				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{profileConfigMap(c, minor)}, "verbs": []string{"get", "patch", "list", "watch"}},
+				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{"worker-config-default-" + minor}, "verbs": []string{"get"}},
+				kube.Object{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "verbs": []string{"create"}},
+				kube.Object{"apiGroups": []string{"rbac.authorization.k8s.io"}, "resources": []string{"roles", "rolebindings"}, "verbs": []string{"create"}},
+				kube.Object{"apiGroups": []string{"rbac.authorization.k8s.io"}, "resources": []string{"roles", "rolebindings"}, "resourceNames": []string{workerProfileRole(c)}, "verbs": []string{"get", "patch"}},
 				kube.Object{"apiGroups": []string{""}, "resources": []string{"secrets"}, "verbs": []string{"create"}},
 				kube.Object{"apiGroups": []string{""}, "resources": []string{"secrets"}, "resourceNames": []string{tokenName(c)}, "verbs": []string{"get", "delete"}},
 			}

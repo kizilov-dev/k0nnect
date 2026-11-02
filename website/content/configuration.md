@@ -53,7 +53,7 @@ The server listens on `port + 1`. Initial /24 addresses are assigned to gateways
 
 ## MTU
 
-`mtu` controls the gateway interface `k0ngw0` and the default route inside the worker namespace. The server's `eth1` uses the original node network's MTU: gateways publish it in `k0nnect.io/node-mtu`, and the installer selects the minimum.
+`mtu` controls the gateway interface `k0ngw0` and the default route inside the worker namespace. The server's `eth1` uses the original node network's MTU: gateways publish it in the `gateway-state` ConfigMap of their namespace, and the installer selects the minimum.
 
 CNIs that derive Pod MTU from `eth1` can then use a consistent Pod MTU across locations. Oversized outer packets are fragmented. CNI MTU configuration itself is not patched; nested encapsulation and fragmentation are checked by TCP/UDP probes.
 

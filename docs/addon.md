@@ -39,7 +39,9 @@ The VDS physical interfaces retain their addresses.
 Gateway agents run on the existing workers using hostNetwork and NET_ADMIN. They
 own interface `k0ngw0`, worker /32 routes with protocol 242 and comment-tagged
 iptables forwarding/SNAT rules. The worker namespace default route uses the first
-public gateway to reach the private controller, konnectivity and Internet.
+public gateway to reach the private controller, konnectivity and Internet; the
+gateway drops forwarded worker traffic to link-local `169.254.0.0/16`, so cloud
+metadata of the gateway node stays unreachable from the VDS.
 Specific original node IP /32 routes keep CNI tunnel endpoints (VXLAN, Geneve,
 IPIP) reachable through the corresponding gateway without masquerading. The CNI
 retains ownership of Pod routes and pools.
@@ -48,7 +50,7 @@ endpoint is learned from authenticated packets. This requires outbound UDP and
 return traffic; it is not arbitrary NAT traversal. There is no primary gateway
 failover yet. The transport MTU is 1400 (gateway `k0ngw0` and the worker default
 route). The worker `eth1` instead carries the existing nodes' interface MTU,
-published by gateway agents as `k0nnect.io/node-mtu`: CNIs derive the Pod MTU from
+published by gateway agents in ConfigMap `gateway-state`: CNIs derive the Pod MTU from
 it, and a smaller Pod MTU on the VDS made larger packets arriving through Flannel
 or Cilium tunnels vanish at the Pod veth. Larger outer packets are fragmented by
 the kernel; the CNI MTU itself is not patched.
@@ -67,8 +69,11 @@ cluster's encryption-at-rest and access policy. The administrator kubeconfig is
 never copied to the VDS or addon. Enrollment uses a standard k0s bootstrap token
 with a one-hour expiry; the connector revokes it after joining or a failed attempt.
 
-The installer has explicit RBAC, not the cluster-admin role. It can patch Nodes,
-approve kubelet-serving CSRs and manage its gateway resources. CSR identity,
+The installer has explicit RBAC, not the cluster-admin role. It can patch only
+the external Node, approve kubelet-serving CSRs and manage its gateway resources;
+outside its namespace get/patch is limited to its own worker profile, Role and
+gateway ClusterRole plus read access to the default worker profile and CNI
+configuration. CSR identity,
 signature and SANs are checked before approval. Bootstrap Secret read/delete is
 limited to the connection's deterministic token name. Kubernetes cannot restrict
 Secret **create** by resourceNames, so that permission in kube-system remains

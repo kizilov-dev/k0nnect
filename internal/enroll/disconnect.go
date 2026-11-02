@@ -52,24 +52,7 @@ func RemoveNetwork(ctx context.Context, kind, path string) error {
 			return e
 		}
 	}
-	comment := "k0nnect:" + n.Name
-	for _, r := range [][]string{
-		{"-t", "nat", "POSTROUTING", "-s", n.WorkerAddress + "/32", "!", "-o", GatewayInterface, "-m", "comment", "--comment", comment, "-j", "MASQUERADE"},
-		{"-t", "filter", "FORWARD", "-i", GatewayInterface, "-s", n.WorkerAddress + "/32", "-m", "comment", "--comment", comment, "-j", "ACCEPT"},
-		{"-t", "filter", "FORWARD", "-o", GatewayInterface, "-d", n.WorkerAddress + "/32", "-m", "comment", "--comment", comment, "-j", "ACCEPT"},
-	} {
-		for {
-			check := append([]string{"-w", "5", r[0], r[1], "-C"}, r[2:]...)
-			if _, err := command(ctx, "iptables", check...); err != nil {
-				break
-			}
-			del := append([]string{"-w", "5", r[0], r[1], "-D"}, r[2:]...)
-			if _, e = command(ctx, "iptables", del...); e != nil {
-				return e
-			}
-		}
-	}
-	return nil
+	return deleteRules(ctx, append(gatewayRules(n), legacyGatewayRules(n)...))
 }
 
 func Disconnect(ctx context.Context, k *kube.Client, c Config, drain bool, out io.Writer) error {

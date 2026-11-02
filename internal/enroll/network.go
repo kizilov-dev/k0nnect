@@ -210,17 +210,49 @@ func ensureGateway(ctx context.Context, n Network, key string) error {
 	if strings.TrimSpace(string(forwarding)) != "1" {
 		return fmt.Errorf("gateway requires existing IPv4 forwarding enabled by the CNI")
 	}
-	ownerComment := "k0nnect:" + n.Name
-	rules := [][]string{
-		{"-t", "nat", "POSTROUTING", "-s", n.WorkerAddress + "/32", "!", "-o", GatewayInterface, "-m", "comment", "--comment", ownerComment, "-j", "MASQUERADE"},
-		{"-t", "filter", "FORWARD", "-i", GatewayInterface, "-s", n.WorkerAddress + "/32", "-m", "comment", "--comment", ownerComment, "-j", "ACCEPT"},
-		{"-t", "filter", "FORWARD", "-o", GatewayInterface, "-d", n.WorkerAddress + "/32", "-m", "comment", "--comment", ownerComment, "-j", "ACCEPT"},
-	}
-	for _, r := range rules {
+	for _, r := range gatewayRules(n) {
 		check := append([]string{"-w", "5", r[0], r[1], "-C"}, r[2:]...)
 		if _, e = command(ctx, "iptables", check...); e != nil {
 			add := append([]string{"-w", "5", r[0], r[1], "-I", r[2], "1"}, r[3:]...)
 			if _, e = command(ctx, "iptables", add...); e != nil {
+				return e
+			}
+		}
+	}
+	return deleteRules(ctx, legacyGatewayRules(n))
+}
+
+// LinkLocal holds cloud metadata services. Forwarding the Worker there would
+// expose the gateway node's instance identity and user data to the VDS.
+const LinkLocal = "169.254.0.0/16"
+
+// gatewayRules forward and masquerade the Worker's traffic. The inbound accept
+// excludes link-local destinations, so the drop applies whatever the rule order.
+func gatewayRules(n Network) [][]string {
+	owner := "k0nnect:" + n.Name
+	worker := n.WorkerAddress + "/32"
+	return [][]string{
+		{"-t", "nat", "POSTROUTING", "-s", worker, "!", "-o", GatewayInterface, "-m", "comment", "--comment", owner, "-j", "MASQUERADE"},
+		{"-t", "filter", "FORWARD", "-i", GatewayInterface, "-s", worker, "!", "-d", LinkLocal, "-m", "comment", "--comment", owner, "-j", "ACCEPT"},
+		{"-t", "filter", "FORWARD", "-o", GatewayInterface, "-d", worker, "-m", "comment", "--comment", owner, "-j", "ACCEPT"},
+		{"-t", "filter", "FORWARD", "-i", GatewayInterface, "-s", worker, "-d", LinkLocal, "-m", "comment", "--comment", owner, "-j", "DROP"},
+	}
+}
+
+// legacyGatewayRules were installed by releases that forwarded every destination.
+func legacyGatewayRules(n Network) [][]string {
+	return [][]string{{"-t", "filter", "FORWARD", "-i", GatewayInterface, "-s", n.WorkerAddress + "/32", "-m", "comment", "--comment", "k0nnect:" + n.Name, "-j", "ACCEPT"}}
+}
+
+func deleteRules(ctx context.Context, rules [][]string) error {
+	for _, r := range rules {
+		for {
+			check := append([]string{"-w", "5", r[0], r[1], "-C"}, r[2:]...)
+			if _, err := command(ctx, "iptables", check...); err != nil {
+				break
+			}
+			del := append([]string{"-w", "5", r[0], r[1], "-D"}, r[2:]...)
+			if _, e := command(ctx, "iptables", del...); e != nil {
 				return e
 			}
 		}
@@ -318,8 +350,13 @@ func workerConfiguration(n Network, key string) []byte {
 	return []byte(cfg.String())
 }
 
-// NodeMTUAnnotation publishes the MTU of the interface carrying a gateway's InternalIP.
-const NodeMTUAnnotation = "k0nnect.io/node-mtu"
+// GatewayState is the ConfigMap where gateway agents publish their WireGuard
+// public key and the MTU of the interface carrying their node's InternalIP.
+// Publishing there instead of on Node objects keeps Node patch rights out of
+// both the gateway and the installer that delegates the gateway's permissions.
+const GatewayState = "gateway-state"
+
+func gatewayStateKeys(node string) (key, mtu string) { return node + ".public-key", node + ".mtu" }
 
 func addressMTU(ctx context.Context, ip string) (int, error) {
 	b, e := command(ctx, "ip", "-j", "-4", "address", "show")
@@ -386,7 +423,8 @@ func Agent(ctx context.Context, kind, path string) error {
 	if e != nil {
 		return e
 	}
-	if _, e = c.Do(ctx, "PATCH", "/api/v1/nodes/"+node, kube.Object{"metadata": kube.Object{"annotations": kube.Object{"k0nnect.io/wireguard-public-key": pub, NodeMTUAnnotation: strconv.Itoa(mtu)}}}); e != nil {
+	keyField, mtuField := gatewayStateKeys(node)
+	if _, e = c.Do(ctx, "PATCH", "/api/v1/namespaces/"+namespace+"/configmaps/"+GatewayState, kube.Object{"data": kube.Object{keyField: pub, mtuField: strconv.Itoa(mtu)}}); e != nil {
 		return e
 	}
 	for {
