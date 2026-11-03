@@ -31,7 +31,7 @@ A worker without a public address initiates a connection to the external server.
 
 ## Bootstrap through the API
 
-The installer creates a standard worker bootstrap Secret with a one-hour expiry. Only a bootstrap document containing the trusted CA and short-lived token is copied to the server. The administrator kubeconfig stays on the workstation.
+The controller or CLI creates a standard worker bootstrap Secret with a one-hour expiry. Only a bootstrap document containing the trusted CA and short-lived token is copied to the server. No administrator kubeconfig is copied there.
 
 A k0s worker profile is cloned, provider-specific runtime cgroup values are removed, and a dedicated resolver is configured. A named RBAC grant lets the new node and its bootstrap identity read only that profile.
 
@@ -39,12 +39,12 @@ Serving CSRs are checked for requestor identity, signature, CN, organization, an
 
 ## Continuous management
 
-The addon consists of a Deployment, ConfigMaps, and SSH Secret. Its installer stays on the original workers and reconciles approximately once a minute. On the server, systemd orders network setup before kubelet; a local agent maintains the worker network independently of the management Pod.
+The install manifest adds CRD `VDSConnection` and a controller Deployment that runs on the original workers. The controller reconciles when the object changes and about once a minute, writes progress to its status, and disconnects the server through a finalizer before the object is deleted. On the server, systemd orders network setup before kubelet; a local agent maintains the worker network independently of the controller.
 
-The current package ships a static Go binary in compressed ConfigMap chunks and installs runtime tools in Ubuntu containers. A dedicated OCI image is future work.
+One image `ghcr.io/kizilov-dev/k0nnect` holds the static Go binary and the network tools. It runs the controller, the gateway agents, and cleanup Jobs; the controller copies its own binary to the server over SSH. The one-off CLI can use the same image or ship its binary in ConfigMap chunks into Ubuntu containers.
 
 ## Transport boundary
 
-The static profile uses `transport.Driver` to separate reconciliation, status, and removal from transport-specific settings. WireGuard is the first implementation. The automatic installer currently uses WireGuard directly; a different transport needs its own implementation and bootstrap validation.
+The static profile uses `transport.Driver` to separate reconciliation, status, and removal from transport-specific settings. WireGuard is the first implementation. The controller and CLI currently use WireGuard directly; a different transport needs its own implementation and bootstrap validation.
 
 Interconnecting independent clusters requires a separate mode with explicit prefix and Service exports and trust boundaries.

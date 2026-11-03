@@ -6,12 +6,13 @@ k0nnect extends **one existing cluster**. Independent control planes, cross-clus
 
 | Component | Requirement |
 | --- | --- |
-| Kubernetes | k0s; original Ready workers use the same minor version |
+| Kubernetes | k0s 1.30–1.40; original Ready workers use the same minor version |
 | Architecture | Linux/amd64 |
 | CNI | A validated Calico, Flannel, Cilium, or kube-router profile |
 | Server | root SSH, apt, systemd, Python 3, kernel WireGuard |
 | API | TLS-verified kubeconfig with client certificate or token |
-| Installation | Permission to install RBAC, bootstrap, and addon resources |
+| Installation | Permission to apply the install manifest: CRD, RBAC, and Deployment |
+| Images | Workers can pull `ghcr.io/kizilov-dev/k0nnect` |
 
 ## CNI profiles
 
@@ -39,7 +40,7 @@ Live tests used k0s 1.36.4 with Calico 3.32.2, Flannel 0.28.9, Cilium 1.20.1, an
 - The transport /24 must not overlap node addresses, Pod pools, or Service IPs.
 - Allow gateway UDP `port` on workers and UDP `port + 1` on the external server.
 - The worker network must reach the private controller API and konnectivity ports.
-- Workers and the server need access to packages, release files, and images.
+- Workers need access to images; the server also needs packages and release files.
 - IPv4 forwarding must already be enabled on gateways by the CNI.
 
 A gateway without ExternalIP initiates WireGuard to the public server. This needs outbound UDP and return traffic; arbitrary NAT traversal and relay are not implemented.
@@ -51,7 +52,8 @@ A gateway without ExternalIP initiates WireGuard to the public server. This need
 - WireGuard is the implemented enrollment transport. Other transports need implementation.
 - Existing node address migration requires an explicit disconnect.
 - Host reboot, sustained load, NetworkPolicy, CSI, and cloud LoadBalancer behavior remain uncertified.
-- No CRD, Helm chart, management UI, or dedicated installer image yet.
+- One VDSConnection named `vds`; its spec is immutable.
+- No Helm chart or management UI yet.
 
 ## Why the CNI matters
 

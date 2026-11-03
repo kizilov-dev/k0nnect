@@ -6,13 +6,13 @@ k0nnect устанавливает привилегированную инфра
 
 SSH-сервер проверяется по закреплённому SHA256 fingerprint до выполнения операций. Текущий проверенный профиль использует Ed25519. Несовпадение ключа останавливает подключение.
 
-CLI читает пароль или private key из локального файла. Аддон копирует его в Secret `vds-ssh`, смонтированный с режимом `0400` в Pod установщика. Пароль не включается в публичный JSON соединения.
+Контроллер читает пароль или private key из Secret `vds-ssh` своего namespace по имени через API; Secret не монтируется. CLI читает локальный файл или SSH agent. Учётные данные никогда не входят в VDSConnection и JSON соединения.
 
 WireGuard-ключи генерируются на соответствующих хостах и хранятся root-only. В конфигурацию peers передаются только публичные ключи.
 
 ## Данные Kubernetes
 
-Администраторский kubeconfig остаётся на рабочей машине. На VDS передаётся только worker bootstrap с доверенным CA и token со сроком один час. После успешного присоединения или ошибки попытки token отзывается; если отзыв недоступен, остаётся ограниченный срок действия.
+Контроллер работает от собственного ServiceAccount; CLI оставляет администраторский kubeconfig на рабочей машине. На VDS передаётся только worker bootstrap с доверенным CA и token со сроком один час. После успешного присоединения или ошибки попытки token отзывается; если отзыв недоступен, остаётся ограниченный срок действия.
 
 Kubernetes Secret не гарантирует шифрование на диске сам по себе. Защита etcd, encryption at rest и ограничения чтения Secret определяются конфигурацией кластера.
 
@@ -20,7 +20,7 @@ Kubernetes Secret не гарантирует шифрование на диск
 
 Gateway Pod использует hostNetwork, NET_ADMIN и собственный hostPath для состояния. Он создаёт интерфейс и маршруты, добавляет помеченные правила forwarding/SNAT. Владение проверяется по alias интерфейса, меткам Kubernetes и маркеру установленного Worker.
 
-Gateway-агент только читает объект своей ноды; публичный ключ WireGuard и MTU он публикует в ConfigMap `gateway-state` своего namespace. Ни gateway, ни установщик не могут менять объекты Node, кроме самой внешней ноды. Если Cilium работает с kube-proxy replacement, NodePort-сервис для gateway не создаётся, и порт не резервируется в Kubernetes.
+Gateway-агент только читает объект своей ноды; публичный ключ WireGuard и MTU он публикует в ConfigMap `gateway-state` своего namespace. Ни gateway, ни контроллер не могут менять объекты Node, кроме самой внешней ноды. Если Cilium работает с kube-proxy replacement, NodePort-сервис для gateway не создаётся, и порт не резервируется в Kubernetes.
 
 Основной gateway пересылает трафик внешнего Worker к API, konnectivity и во внешнюю сеть, маскируя его под адрес своей ноды. В link-local `169.254.0.0/16` трафик не пересылается: там сервисы метаданных облака, которые раскрыли бы identity и user data ноды gateway. Остальные приватные сети, доступные ноде gateway, внешнему Worker доступны — как и Pod на исходных нодах; при необходимости ограничьте их своим firewall.
 
@@ -28,19 +28,33 @@ Gateway-агент только читает объект своей ноды; �
 
 ## Что скачивается на VDS
 
-Релиз k0s загружается с GitHub и сверяется с `sha256sums.txt` того же релиза. Стандартные CNI-плагины containernetworking/plugins ставятся, только если их нет, из релиза с sha256, закреплённым в коде; существующие файлы не заменяются. Пакеты WireGuard, iptables и curl ставятся из apt-репозиториев VDS.
+Релиз k0s загружается с GitHub и сверяется с `sha256sums.txt` того же релиза. Стандартные CNI-плагины containernetworking/plugins ставятся, только если их нет, из релиза с sha256, закреплённым в коде; существующие файлы не заменяются. Пакеты WireGuard, iptables и curl ставятся из apt-репозиториев VDS. Gateway на исходных Workers запускаются из образа k0nnect и пакеты не ставят.
 
-`disconnect` завершает оставшиеся containerd-shim k0s и удаляет на VDS локальное состояние CNI удалённой ноды: `/etc/cni/net.d`, `/var/lib/cni`, `/run/flannel` и состояние Calico, Cilium и kube-router. Установщик принимает только VDS без чужой установки k0s; не подключайте сервер, где эти каталоги использует другое ПО.
+`disconnect` завершает оставшиеся containerd-shim k0s и удаляет на VDS локальное состояние CNI удалённой ноды: `/etc/cni/net.d`, `/var/lib/cni`, `/run/flannel` и состояние Calico, Cilium и kube-router. k0nnect принимает только VDS без чужой установки k0s; не подключайте сервер, где эти каталоги использует другое ПО.
 
-## RBAC установщика
+## RBAC контроллера
 
-Аддон использует явные роли вместо cluster-admin. Среди необходимых возможностей — чтение совместимости, управление собственными workload-ресурсами и gateway RBAC, создание bootstrap Secret и проверяемое одобрение kubelet-serving CSR.
+Контроллер использует явные роли вместо cluster-admin. Его RBAC статичен и лежит в `install.yaml`, поэтому его можно проверить до установки. Среди необходимых возможностей — чтение совместимости, управление собственными workload-ресурсами и gateway RBAC, создание bootstrap Secret, drain ноды и проверяемое одобрение kubelet-serving CSR.
 
-За пределами своего namespace любые изменения и удаления ограничены именами объектов: patch только внешней Node, get/patch только своего worker-профиля k0s, своей Role и ClusterRole gateway, чтение только исходного worker-профиля и конфигурации CNI. Менять CoreDNS, kube-proxy, другие Node и чужие роли установщик не может. **Создание** Kubernetes по `resourceNames` ограничить не умеет; создать роль шире собственных прав не даёт встроенная защита RBAC от эскалации.
+Имена фиксированы, поэтому изменения ограничены именами везде, где это позволяет Kubernetes: patch и delete только Node `k0nnect-vds`; get и delete только bootstrap token Secret с фиксированным именем; управление только своими worker-профилями k0s, их Role и ClusterRole gateway; чтение только исходных worker-профилей и конфигурации CNI. Имена профилей включают minor-версию k0s, поэтому они перечислены для 1.30–1.40. Менять CoreDNS, kube-proxy, другие Node и чужие роли контроллер не может.
 
-Чтение и удаление bootstrap Secret ограничены именем token данного соединения. Kubernetes RBAC не умеет ограничивать **создание** Secret через `resourceNames`, поэтому create в kube-system остаётся более широким правом.
+Часть прав остаётся широкой. **Создание** Kubernetes по `resourceNames` ограничить не умеет, поэтому контроллер может создавать RBAC-объекты, ConfigMap и Secret; создать роль шире собственных прав не даёт встроенная защита RBAC от эскалации. Для drain нужны список Pod во всём кластере и eviction. Для проверки кластера — списки Node, namespace и Service. Одобрение CSR ограничено signer kubelet-serving.
+
+Pod контроллера работает не от root, с read-only корневой ФС и без capabilities. Но он создаёт Pod с hostNetwork и NET_ADMIN в своём namespace, где разрешены привилегированные Pod, и держит root SSH к VDS. Считайте его равным root на нодах, как оператор CNI: ограничение по именам — дополнительный слой защиты, а не граница изоляции.
 
 Для serving CSR проверяются requestor, signer, подпись запроса, CN, organization, DNS и IP SAN. Одобрение произвольных CSR не является частью алгоритма.
+
+## Происхождение образа
+
+Релизные образы подписываются keyless cosign в release workflow, а `install.yaml` закрепляет образ по digest. Проверить digest до установки:
+
+```sh
+cosign verify ghcr.io/kizilov-dev/k0nnect@sha256:<digest> \
+  --certificate-identity-regexp '^https://github.com/kizilov-dev/k0nnect/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Каждый релиз также публикует `k0nnect-linux-amd64` и `SHA256SUMS`.
 
 ## Граница обещаний
 

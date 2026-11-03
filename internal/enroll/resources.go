@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"k0nnect/internal/kube"
@@ -27,17 +28,47 @@ func ensureNamespace(ctx context.Context, k *kube.Client, c Config) error {
 		}
 	}
 	if e == nil {
-		if kube.Str(kube.Map(kube.Map(existing, "metadata"), "annotations"), "k0nnect.io/connection") != c.Name {
-			return fmt.Errorf("namespace is not owned by this connection")
-		}
-		return nil
+		return namespaceOwned(existing, c)
 	}
-	if !kube.Code(e, 404) {
+	if !kube.Code(e, 404) || c.InCluster {
 		return e
 	}
 	_, e = k.Do(ctx, "POST", "/api/v1/namespaces", kube.Object{"apiVersion": "v1", "kind": "Namespace", "metadata": kube.Object{"name": c.Namespace, "labels": kube.Object{"app.kubernetes.io/managed-by": "k0nnect", "pod-security.kubernetes.io/enforce": "privileged"}, "annotations": kube.Object{"k0nnect.io/connection": c.Name}}})
 	return e
 }
+
+// namespaceOwned accepts a connection's own namespace or, for the controller,
+// the namespace of its install manifest.
+func namespaceOwned(ns kube.Object, c Config) error {
+	annotations := kube.Map(kube.Map(ns, "metadata"), "annotations")
+	if c.InCluster {
+		if kube.Str(annotations, "k0nnect.io/controller") != c.Name {
+			return fmt.Errorf("namespace %s does not belong to the k0nnect controller", c.Namespace)
+		}
+		return nil
+	}
+	if kube.Str(annotations, "k0nnect.io/connection") != c.Name {
+		return fmt.Errorf("namespace is not owned by this connection")
+	}
+	return nil
+}
+
+// agentContainer runs a k0nnect subcommand on a cluster node: from the
+// configured image, or from this binary shipped through ConfigMaps into a
+// stock Ubuntu image that installs the network tools first.
+func agentContainer(ctx context.Context, k *kube.Client, c Config, name, packages string, args ...string) (kube.Object, []any, error) {
+	if c.Image != "" {
+		return kube.Object{"name": name, "image": c.Image, "command": append([]string{"/usr/local/bin/k0nnect"}, args...)}, nil, nil
+	}
+	sources, e := payload(ctx, k, c)
+	if e != nil {
+		return nil, nil, e
+	}
+	startup := "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " + packages + " && cat /payload/part* | gzip -d > /tmp/k0nnect && chmod 0700 /tmp/k0nnect && exec /tmp/k0nnect " + strings.Join(args, " ")
+	container := kube.Object{"name": name, "image": "ubuntu:24.04", "command": []string{"bash", "-ec", startup}, "volumeMounts": []any{kube.Object{"name": "payload", "mountPath": "/payload", "readOnly": true}}}
+	return container, []any{kube.Object{"name": "payload", "projected": kube.Object{"sources": sources}}}, nil
+}
+
 func payload(ctx context.Context, k *kube.Client, c Config) ([]any, error) {
 	path, e := os.Executable()
 	if e != nil {
@@ -116,17 +147,21 @@ func gatewayResources(ctx context.Context, k *kube.Client, c Config, networks ma
 	if e := applyOwned(ctx, k, c, "/apis/rbac.authorization.k8s.io/v1/namespaces/"+c.Namespace+"/rolebindings", "gateway-config", rb); e != nil {
 		return e
 	}
-	sources, e := payload(ctx, k, c)
+	container, volumes, e := agentContainer(ctx, k, c, "gateway", "wireguard-tools iproute2 iptables ca-certificates", "gateway-agent")
 	if e != nil {
 		return e
 	}
-	startup := "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables ca-certificates && cat /payload/part* | gzip -d > /tmp/k0nnect && chmod 0700 /tmp/k0nnect && exec /tmp/k0nnect gateway-agent"
+	container["env"] = []any{kube.Object{"name": "NODE_NAME", "valueFrom": kube.Object{"fieldRef": kube.Object{"fieldPath": "spec.nodeName"}}}, kube.Object{"name": "POD_NAMESPACE", "value": c.Namespace}}
+	container["securityContext"] = kube.Object{"capabilities": kube.Object{"add": []string{"NET_ADMIN"}}, "allowPrivilegeEscalation": false}
+	container["resources"] = kube.Object{"requests": kube.Object{"cpu": "25m", "memory": "32Mi"}, "limits": kube.Object{"memory": "256Mi"}}
+	container["volumeMounts"] = append(kube.Items(container, "volumeMounts"), kube.Object{"name": "state", "mountPath": "/state"})
+	container["readinessProbe"] = kube.Object{"exec": kube.Object{"command": []string{"test", "-f", "/tmp/k0nnect-ready"}}, "periodSeconds": 3}
 	// Node field selectors accept one value per term; terms are ORed.
 	terms := make([]any, 0, len(nodes))
 	for _, node := range nodes {
 		terms = append(terms, kube.Object{"matchFields": []any{kube.Object{"key": "metadata.name", "operator": "In", "values": []string{node}}}})
 	}
-	podSpec := kube.Object{"serviceAccountName": "gateway", "hostNetwork": true, "dnsPolicy": "ClusterFirstWithHostNet", "tolerations": []any{kube.Object{"operator": "Exists"}}, "affinity": kube.Object{"nodeAffinity": kube.Object{"requiredDuringSchedulingIgnoredDuringExecution": kube.Object{"nodeSelectorTerms": terms}}}, "containers": []any{kube.Object{"name": "gateway", "image": "ubuntu:24.04", "command": []string{"bash", "-ec", startup}, "env": []any{kube.Object{"name": "NODE_NAME", "valueFrom": kube.Object{"fieldRef": kube.Object{"fieldPath": "spec.nodeName"}}}, kube.Object{"name": "POD_NAMESPACE", "value": c.Namespace}}, "securityContext": kube.Object{"capabilities": kube.Object{"add": []string{"NET_ADMIN"}}, "allowPrivilegeEscalation": false}, "resources": kube.Object{"requests": kube.Object{"cpu": "25m", "memory": "32Mi"}, "limits": kube.Object{"memory": "256Mi"}}, "volumeMounts": []any{kube.Object{"name": "payload", "mountPath": "/payload", "readOnly": true}, kube.Object{"name": "state", "mountPath": "/state"}}, "readinessProbe": kube.Object{"exec": kube.Object{"command": []string{"test", "-f", "/tmp/k0nnect-ready"}}, "periodSeconds": 3}}}, "volumes": []any{kube.Object{"name": "payload", "projected": kube.Object{"sources": sources}}, kube.Object{"name": "state", "hostPath": kube.Object{"path": "/var/lib/k0nnect/" + c.Name, "type": "DirectoryOrCreate"}}}}
+	podSpec := kube.Object{"serviceAccountName": "gateway", "hostNetwork": true, "dnsPolicy": "ClusterFirstWithHostNet", "tolerations": []any{kube.Object{"operator": "Exists"}}, "affinity": kube.Object{"nodeAffinity": kube.Object{"requiredDuringSchedulingIgnoredDuringExecution": kube.Object{"nodeSelectorTerms": terms}}}, "containers": []any{container}, "volumes": append(volumes, kube.Object{"name": "state", "hostPath": kube.Object{"path": "/var/lib/k0nnect/" + c.Name, "type": "DirectoryOrCreate"}})}
 	ds := kube.Object{"apiVersion": "apps/v1", "kind": "DaemonSet", "metadata": kube.Object{"name": "gateway", "namespace": c.Namespace}, "spec": kube.Object{"selector": kube.Object{"matchLabels": labels}, "template": kube.Object{"metadata": kube.Object{"labels": labels}, "spec": podSpec}}}
 	if e = applyOwned(ctx, k, c, "/apis/apps/v1/namespaces/"+c.Namespace+"/daemonsets", "gateway", ds); e != nil {
 		return e

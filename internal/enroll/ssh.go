@@ -40,6 +40,16 @@ func Dial(ctx context.Context, c Config) (*Remote, error) {
 		}
 		auth = append(auth, ssh.PublicKeys(key))
 	}
+	if c.Password != "" {
+		auth = append(auth, ssh.Password(c.Password))
+	}
+	if len(c.PrivateKey) > 0 {
+		key, e := ssh.ParsePrivateKey(c.PrivateKey)
+		if e != nil {
+			return nil, fmt.Errorf("invalid SSH private key")
+		}
+		auth = append(auth, ssh.PublicKeys(key))
+	}
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" && len(auth) == 0 {
 		if conn, e := net.Dial("unix", sock); e == nil {
 			agentConn = conn

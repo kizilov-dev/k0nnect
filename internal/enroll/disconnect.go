@@ -66,20 +66,14 @@ func Disconnect(ctx context.Context, k *kube.Client, c Config, drain bool, out i
 	if e != nil {
 		return e
 	}
-	if kube.Str(kube.Map(kube.Map(namespace, "metadata"), "annotations"), "k0nnect.io/connection") != c.Name {
-		return fmt.Errorf("foreign namespace")
+	if e = namespaceOwned(namespace, c); e != nil {
+		return e
 	}
 	ns := "/api/v1/namespaces/" + c.Namespace
-	dep := "/apis/apps/v1/namespaces/" + c.Namespace + "/deployments/installer"
-	if d, err := k.Get(ctx, dep); err == nil {
-		if kube.Str(kube.Map(kube.Map(d, "metadata"), "labels"), "k0nnect.io/connection") != c.Name {
-			return fmt.Errorf("foreign installer Deployment")
-		}
-		if _, e = k.Do(ctx, "PATCH", dep, kube.Object{"spec": kube.Object{"replicas": 0}}); e != nil {
+	if !c.InCluster {
+		if e = stopLegacyInstaller(ctx, k, c); e != nil {
 			return e
 		}
-	} else if !kube.Code(err, 404) {
-		return err
 	}
 	nodePath := "/api/v1/nodes/" + c.NodeName
 	if node, err := k.Get(ctx, nodePath); err == nil {
@@ -128,14 +122,21 @@ func Disconnect(ctx context.Context, k *kube.Client, c Config, drain bool, out i
 	} else if !kube.Code(err, 404) {
 		return err
 	}
-	r, e := Dial(ctx, c)
-	if e != nil {
-		return e
-	}
-	defer r.Close()
-	stop := stopWorkerScript(c)
-	if _, e = r.Run(ctx, stop, nil); e != nil {
-		return fmt.Errorf("stop owned Worker services: %w", e)
+	if r, err := Dial(ctx, c); err == nil {
+		defer r.Close()
+		if _, e = r.Run(ctx, stopWorkerScript(c), nil); e != nil {
+			return fmt.Errorf("stop owned Worker services: %w", e)
+		}
+	} else {
+		// Connect starts the Worker network only after publishing the gateway
+		// network and registers the Node after that; without both nothing
+		// runs on the VDS, e.g. when its address or credentials were wrong.
+		_, nodeErr := k.Get(ctx, nodePath)
+		_, networkErr := k.Get(ctx, ns+"/configmaps/gateway-network")
+		if !kube.Code(nodeErr, 404) || !kube.Code(networkErr, 404) {
+			return err
+		}
+		fmt.Fprintln(out, "VDS unreachable, but no Worker or network was started there; removing cluster objects only:", err)
 	}
 	if e = ownedDelete(ctx, k, nodePath, c.Name); e != nil {
 		return e
@@ -161,10 +162,12 @@ func Disconnect(ctx context.Context, k *kube.Client, c Config, drain bool, out i
 		return e
 	}
 	if e == nil {
-		sources, err := payload(ctx, k, c)
+		container, volumes, err := agentContainer(ctx, k, c, "cleanup", "wireguard-tools iproute2 iptables", "gateway-remove", "--config", "/network/network.json")
 		if err != nil {
 			return err
 		}
+		container["securityContext"] = kube.Object{"capabilities": kube.Object{"add": []string{"NET_ADMIN"}}}
+		container["volumeMounts"] = append(kube.Items(container, "volumeMounts"), kube.Object{"name": "network", "mountPath": "/network", "readOnly": true})
 		for name, raw := range kube.Map(cm, "data") {
 			var network Network
 			s, _ := raw.(string)
@@ -173,9 +176,22 @@ func Disconnect(ctx context.Context, k *kube.Client, c Config, drain bool, out i
 			}
 			jobName := "cleanup-" + strings.ReplaceAll(name, ".", "-")
 			labels := kube.Object{"k0nnect.io/connection": c.Name}
-			startup := "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables && cat /payload/part* | gzip -d > /tmp/k0nnect && chmod 0700 /tmp/k0nnect && exec /tmp/k0nnect gateway-remove --config /network/network.json"
-			job := kube.Object{"apiVersion": "batch/v1", "kind": "Job", "metadata": kube.Object{"name": jobName, "namespace": c.Namespace, "labels": labels}, "spec": kube.Object{"backoffLimit": 0, "activeDeadlineSeconds": 180, "template": kube.Object{"metadata": kube.Object{"labels": labels}, "spec": kube.Object{"nodeName": name, "hostNetwork": true, "restartPolicy": "Never", "automountServiceAccountToken": false, "tolerations": []any{kube.Object{"operator": "Exists"}}, "containers": []any{kube.Object{"name": "cleanup", "image": "ubuntu:24.04", "command": []string{"bash", "-ec", startup}, "securityContext": kube.Object{"capabilities": kube.Object{"add": []string{"NET_ADMIN"}}}, "volumeMounts": []any{kube.Object{"name": "payload", "mountPath": "/payload", "readOnly": true}, kube.Object{"name": "network", "mountPath": "/network", "readOnly": true}}}}, "volumes": []any{kube.Object{"name": "payload", "projected": kube.Object{"sources": sources}}, kube.Object{"name": "network", "configMap": kube.Object{"name": "gateway-network", "items": []any{kube.Object{"key": name, "path": "network.json"}}}}}}}}}
+			podVolumes := append(append([]any{}, volumes...), kube.Object{"name": "network", "configMap": kube.Object{"name": "gateway-network", "items": []any{kube.Object{"key": name, "path": "network.json"}}}})
+			job := kube.Object{"apiVersion": "batch/v1", "kind": "Job", "metadata": kube.Object{"name": jobName, "namespace": c.Namespace, "labels": labels}, "spec": kube.Object{"backoffLimit": 0, "activeDeadlineSeconds": 180, "template": kube.Object{"metadata": kube.Object{"labels": labels}, "spec": kube.Object{"nodeName": name, "hostNetwork": true, "restartPolicy": "Never", "automountServiceAccountToken": false, "tolerations": []any{kube.Object{"operator": "Exists"}}, "containers": []any{container}, "volumes": podVolumes}}}}
 			jobPath := "/apis/batch/v1/namespaces/" + c.Namespace + "/jobs"
+			// A cleanup interrupted by a controller restart leaves its Job behind;
+			// the removal is idempotent, so the Job is recreated.
+			if err = ownedDelete(ctx, k, jobPath+"/"+jobName, c.Name); err != nil {
+				return err
+			}
+			for _, err = k.Get(ctx, jobPath+"/"+jobName); err == nil; _, err = k.Get(ctx, jobPath+"/"+jobName) {
+				if err = pause(ctx, 2*time.Second); err != nil {
+					return err
+				}
+			}
+			if !kube.Code(err, 404) {
+				return err
+			}
 			if _, err = k.Do(ctx, "POST", jobPath, job); err != nil {
 				return err
 			}
@@ -200,31 +216,38 @@ func Disconnect(ctx context.Context, k *kube.Client, c Config, drain bool, out i
 	if e = ownedDelete(ctx, k, "/api/v1/namespaces/kube-system/secrets/"+tokenName(c), c.Name); e != nil {
 		return e
 	}
-	profiles, e := k.Get(ctx, "/api/v1/namespaces/kube-system/configmaps?labelSelector=k0nnect.io%2Fconnection%3D"+c.Name)
-	if e != nil {
-		return e
-	}
-	for _, v := range kube.Items(profiles, "items") {
-		obj := kube.As(v)
-		if e = ownedDelete(ctx, k, "/api/v1/namespaces/kube-system/configmaps/"+kube.Str(kube.Map(obj, "metadata"), "name"), c.Name); e != nil {
+	// Profiles are removed by name: the controller may not list kube-system ConfigMaps.
+	for _, minor := range supportedMinors {
+		if e = ownedDelete(ctx, k, "/api/v1/namespaces/kube-system/configmaps/"+profileConfigMap(c, minor), c.Name); e != nil {
 			return e
 		}
 	}
+	suffixes, roles := []string{"-gateway", "-installer"}, []string{c.Namespace + "-installer-local", c.Namespace + "-worker-profile"}
+	if c.InCluster {
+		suffixes, roles = suffixes[:1], roles[1:]
+	}
 	for _, kind := range []string{"clusterrolebindings", "clusterroles"} {
-		for _, suffix := range []string{"-gateway", "-installer"} {
+		for _, suffix := range suffixes {
 			if e = ownedDelete(ctx, k, "/apis/rbac.authorization.k8s.io/v1/"+kind+"/"+c.Namespace+suffix, c.Name); e != nil {
 				return e
 			}
 		}
 	}
 	for _, kind := range []string{"rolebindings", "roles"} {
-		for _, name := range []string{c.Namespace + "-installer-local", c.Namespace + "-worker-profile"} {
+		for _, name := range roles {
 			if e = ownedDelete(ctx, k, "/apis/rbac.authorization.k8s.io/v1/namespaces/kube-system/"+kind+"/"+name, c.Name); e != nil {
 				return e
 			}
 		}
 	}
-	if e = k.Delete(ctx, "/api/v1/namespaces/"+c.Namespace); e != nil {
+	if c.InCluster {
+		// The controller's namespace and its own objects come from the install
+		// manifest and carry no connection label.
+		e = deleteLabeled(ctx, k, c)
+	} else {
+		e = k.Delete(ctx, "/api/v1/namespaces/"+c.Namespace)
+	}
+	if e != nil {
 		return e
 	}
 	fmt.Fprintln(out, "Disconnected. K0s data, installed packages and owner-only keys on the VDS are preserved for recovery; no user data was reset.")
@@ -258,4 +281,38 @@ rm -rf /etc/cni/net.d /var/lib/cni /run/flannel /var/run/calico /var/lib/calico 
 rm -f /sys/fs/bpf/tc/globals/cilium_*
 if test -f /etc/k0nnect/worker.json; then /usr/local/bin/k0nnect worker-remove --config /etc/k0nnect/worker.json; fi
 fi`
+}
+
+// Installations made by the former addon-install command run an installer
+// Deployment that would reconnect the Worker during disconnect.
+func stopLegacyInstaller(ctx context.Context, k *kube.Client, c Config) error {
+	dep := "/apis/apps/v1/namespaces/" + c.Namespace + "/deployments/installer"
+	d, e := k.Get(ctx, dep)
+	if kube.Code(e, 404) {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	if kube.Str(kube.Map(kube.Map(d, "metadata"), "labels"), "k0nnect.io/connection") != c.Name {
+		return fmt.Errorf("foreign installer Deployment")
+	}
+	_, e = k.Do(ctx, "PATCH", dep, kube.Object{"spec": kube.Object{"replicas": 0}})
+	return e
+}
+
+func deleteLabeled(ctx context.Context, k *kube.Client, c Config) error {
+	for _, collection := range []string{"/apis/batch/v1/namespaces/%s/jobs", "/apis/apps/v1/namespaces/%s/daemonsets", "/api/v1/namespaces/%s/pods", "/api/v1/namespaces/%s/services", "/api/v1/namespaces/%s/configmaps", "/api/v1/namespaces/%s/serviceaccounts", "/apis/rbac.authorization.k8s.io/v1/namespaces/%s/rolebindings", "/apis/rbac.authorization.k8s.io/v1/namespaces/%s/roles"} {
+		path := fmt.Sprintf(collection, c.Namespace)
+		list, e := k.Get(ctx, path+"?labelSelector=k0nnect.io%2Fconnection%3D"+c.Name)
+		if e != nil {
+			return e
+		}
+		for _, v := range kube.Items(list, "items") {
+			if e = ownedDelete(ctx, k, path+"/"+kube.Str(kube.Map(kube.As(v), "metadata"), "name"), c.Name); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
 }

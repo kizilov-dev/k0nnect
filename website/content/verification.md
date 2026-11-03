@@ -28,7 +28,11 @@ Calico and Cilium re-enrollment used the final multi-CNI build. Flannel and kube
 | External server | Ubuntu 24.04, Linux 6.8, amd64, 1 vCPU, approximately 1 GiB RAM |
 | WireGuard MTU | 1400 |
 
-The original lab also checked addon reconciliation with its ServiceAccount, kubelet logs/WebSocket exec, and recovery after restarting the installed server services.
+The original lab also checked reconciliation by the former in-cluster installer with its ServiceAccount, kubelet logs/WebSocket exec, and recovery after restarting the installed server services.
+
+## In-cluster controller
+
+The controller was checked on a local single-node k0s 1.36 with kube-router and a containerized stand-in server: discovery, pinned SSH, gateways from the release image, status, finalizer, immutable spec, and both disconnect paths, with and without a reachable server. A full worker enrollment through the controller on a real server is still pending.
 
 ## Fixes found through testing
 
@@ -43,7 +47,7 @@ make check
 make site
 ```
 
-Go checks include vet and race-enabled unit tests covering resource ownership, plan redaction, bootstrap limits, CSR validation, and network/CNI configuration. Site checks validate local links, anchors, language, and branding.
+Go checks include vet and race-enabled unit tests covering resource ownership, controller RBAC against its own API requests, plan redaction, bootstrap limits, CSR validation, and network/CNI configuration. Site checks validate local links, anchors, language, and branding.
 
 ## Integration tests
 
@@ -51,4 +55,4 @@ Go checks include vet and race-enabled unit tests covering resource ownership, p
 
 ## Not certified
 
-Full server reboot, sustained load, throughput/latency budgets, NetworkPolicy, CSI, cloud LoadBalancers, primary-gateway failure, addon operation on Flannel/Cilium/kube-router, and other CNI releases or settings. Do not infer those guarantees from Node Ready.
+Full server reboot, sustained load, throughput/latency budgets, NetworkPolicy, CSI, cloud LoadBalancers, primary-gateway failure, full enrollment through the controller, and other CNI releases or settings. Do not infer those guarantees from Node Ready.

@@ -82,7 +82,7 @@ func Preview(ctx context.Context, k *kube.Client, c Config, path string, out io.
 	httpClient := *k.HTTP
 	httpClient.Transport = transport
 	shadow.HTTP = &httpClient
-	if e = InstallAddon(ctx, &shadow, c, io.Discard); e != nil {
+	if e = ensureNamespace(ctx, &shadow, c); e != nil {
 		return e
 	}
 	placeholder := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))

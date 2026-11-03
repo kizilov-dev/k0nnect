@@ -23,13 +23,24 @@ type Config struct {
 	Port           int    `json:"port"`
 	MTU            int    `json:"mtu"`
 	K0sVersion     string `json:"k0sVersion,omitempty"`
-	ClusterID      string `json:"-"`
-	CNI            string `json:"-"`
+	// Image runs gateway agents from a released k0nnect image instead of
+	// shipping this binary through ConfigMaps.
+	Image     string `json:"image,omitempty"`
+	ClusterID string `json:"-"`
+	CNI       string `json:"-"`
 	// GatewayHostPortOnly serves the gateway WireGuard port without a NodePort Service.
 	GatewayHostPortOnly bool `json:"-"`
+	// InCluster marks the controller: its namespace comes from the install
+	// manifest and outlives connections, and SSH credentials come from a Secret.
+	InCluster  bool   `json:"-"`
+	Password   string `json:"-"`
+	PrivateKey []byte `json:"-"`
 }
 
 var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
+
+// imageReference accepts [registry[:port]/]path[:tag][@sha256:digest].
+var imageReference = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*(:[0-9]+)?(/[a-z0-9._-]+)*(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?$`)
 
 func Load(path string) (Config, error) {
 	b, e := os.ReadFile(path)
@@ -82,6 +93,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Port < 30000 || c.Port > 32766 || c.MTU < 1280 || c.MTU > 1440 || c.SSHPort < 1 || c.SSHPort > 65535 {
 		return fmt.Errorf("invalid port or MTU")
+	}
+	if c.Image != "" && !imageReference.MatchString(c.Image) {
+		return fmt.Errorf("invalid image reference")
 	}
 	if len(c.HostKeySHA256) < 20 {
 		return fmt.Errorf("pinned SSH hostKeySHA256 required")

@@ -7,7 +7,7 @@
 **Your server. Your Kubernetes cluster.**
 
 Enroll an external Linux server as a Kubernetes worker over SSH and WireGuard.
-A CLI for installation. An addon for ongoing connection management.
+A controller you install with `kubectl apply`. A CLI for one-off runs.
 
 [Website](https://kizilov-dev.github.io/k0nnect/) · [Quick start](#quick-start) · [Documentation](https://kizilov-dev.github.io/k0nnect/docs/) · [Architecture](docs/architecture.md) · [Live test matrix](docs/cni-matrix-2026-10-30.md)
 
@@ -35,7 +35,7 @@ separate, unimplemented product mode.
 - Enrolls the node with a short-lived bootstrap token and revokes it afterward.
 - Checks scheduling, bidirectional TCP/UDP against every original worker, Service DNS, logs, and exec.
 - Removes the initialization NoSchedule taint only after verification succeeds.
-- Reconciles the connection and reports status when installed as an addon.
+- Reconciles the connection every minute and reports status on a `VDSConnection` object.
 
 Physical server addresses stay in place. Kubelet and containerd use a dedicated
 network namespace. The CNI retains ownership of Pod routes and IPAM.
@@ -47,9 +47,8 @@ network namespace. The CNI retains ownership of Pod routes and IPAM.
 | Cluster | k0s, Linux/amd64 workers on the same Kubernetes minor version |
 | CNI | Validated IPv4 encapsulation profile for Calico, Flannel, Cilium, or kube-router |
 | Server | root SSH, systemd, apt, Python 3, kernel WireGuard support |
-| Access | kubeconfig with installation, RBAC, and worker-bootstrap permissions |
-| Network | Non-overlapping private /24, gateway/server UDP access, package and image access |
-| Build | Linux, Go 1.26 or newer; workstation CLI also needs kubectl |
+| Access | kubectl with cluster-admin to apply the install manifest once |
+| Network | Non-overlapping private /24, gateway/server UDP access, `ghcr.io` image pulls, package access on the server |
 
 See the [CNI compatibility matrix](https://kizilov-dev.github.io/k0nnect/docs/compatibility/).
 Control-plane SSH is not required if the Kubernetes API permits normal worker
@@ -58,87 +57,117 @@ Automatic primary-gateway failover is not implemented.
 
 ## Quick start
 
-### 1. Build
+Everything runs in the cluster; nothing is cloned or built on your machine.
+
+### 1. Install the controller
 
 ```sh
-git clone https://github.com/kizilov-dev/k0nnect.git
-cd k0nnect
-make build
-make plugin                       # bin/kubectl-k0nnect
-export PATH="$PWD/bin:$PATH"
+kubectl apply -f https://github.com/kizilov-dev/k0nnect/releases/latest/download/install.yaml
 ```
 
-### 2. Configure
+The manifest creates namespace `k0nnect-system`, the `VDSConnection` CRD, the
+controller's static RBAC, and its Deployment. The image is pinned by digest and
+signed; review the manifest before applying it.
 
-Copy [examples/connection.json](examples/connection.json) to a private directory
-outside the repository. Replace the documentation address and pinned Ed25519 SSH
-fingerprint. Use a local `0600` password/key file referenced by `passwordFile`
-or `privateKeyFile`; do not put a password inline in JSON.
+### 2. Give the controller SSH access
 
 ```sh
-install -d -m 700 /secure
-cp examples/connection.json /secure/connection.json
-chmod 600 /secure/connection.json
+kubectl -n k0nnect-system create secret generic vds-ssh --from-file=private-key=./id_ed25519
 ```
 
-### 3. Check and preview
+Use key `password` instead of `private-key` for password login. Root SSH is required.
+
+### 3. Describe the server
+
+Edit [examples/vdsconnection.yaml](examples/vdsconnection.yaml): the server address,
+its Ed25519 host-key fingerprint, and a free private /24. Read the fingerprint on the
+server itself or in your provider's console, not over the network you are verifying:
 
 ```sh
-k0nnect connect-check --kubeconfig /secure/cluster.yaml --config /secure/connection.json
-k0nnect connect-plan --kubeconfig /secure/cluster.yaml --config /secure/connection.json \
-  --output /secure/connect-review.json
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+```sh
+kubectl apply -f vdsconnection.yaml
+kubectl get vdsconnection                 # Phase, Node, Message
+kubectl -n k0nnect-system logs -f deploy/controller
+kubectl get node k0nnect-vds -o wide
+```
+
+The object must be named `vds`; the cluster gets one external server, as node
+`k0nnect-vds`. The spec is immutable: delete and recreate the object to change it.
+
+### 4. Disconnect or uninstall
+
+```sh
+kubectl delete vdsconnection vds          # drain, stop the worker, remove gateways
+kubectl delete -f https://github.com/kizilov-dev/k0nnect/releases/latest/download/install.yaml
+```
+
+To upgrade, apply the newer release's `install.yaml`.
+
+### One-off CLI
+
+The CLI connects a server from a workstation without leaving a controller behind.
+Download `k0nnect-linux-amd64` from [Releases](https://github.com/kizilov-dev/k0nnect/releases)
+(Linux/amd64 only: it copies itself to the server) or run `make build`. Copy
+[examples/connection.json](examples/connection.json) to a private `0600` file and
+reference a password or key file; never put a password inline.
+
+```sh
+k0nnect connect-check --kubeconfig cluster.yaml --config connection.json
+k0nnect connect-plan  --kubeconfig cluster.yaml --config connection.json --output review.json
+k0nnect connect       --kubeconfig cluster.yaml --config connection.json
+k0nnect disconnect --drain --kubeconfig cluster.yaml --config connection.json
 ```
 
 `connect-check` reads cluster/server state and reports the detected CNI.
 `connect-plan` sends only GET to the real API, intercepts writes locally, and does
-not use SSH. Secret values are redacted. The plan is for review, not kubectl apply.
-
-### 4. Connect
-
-For persistent management:
-
-```sh
-k0nnect addon-install --kubeconfig /secure/cluster.yaml --config /secure/connection.json
-kubectl --kubeconfig /secure/cluster.yaml -n k0nnect-system logs -f deployment/installer
-kubectl --kubeconfig /secure/cluster.yaml get node k0nnect-vds -o wide
-```
-
-For a one-off installation, use `k0nnect connect` with the same arguments.
-Commands are also available as `kubectl k0nnect …`. The addon was live-tested on
-Calico; the other CNI profiles were tested with the one-off CLI.
-
-## Commands
+not use SSH. A cluster connected by the CLI must be disconnected before the
+controller takes over; the controller refuses objects it does not own.
 
 | Command | Effect |
 | --- | --- |
 | `connect-check` | Read-only compatibility and pinned-SSH preflight |
 | `connect-plan --output PATH` | Local redacted installation plan |
 | `connect` | Install, enroll, and verify the server |
-| `addon-install` | Install the continuous connection manager |
 | `verify-node` | Repeat scheduling, TCP/UDP, DNS, logs, and exec checks |
 | `disconnect --drain` | Drain respecting PDBs and remove owned resources |
+| `manifest --image REF` | Print the controller install manifest for an image |
 
-Commands take `--config PATH --kubeconfig PATH`. Omitting kubeconfig uses an
-in-cluster ServiceAccount. The original static kubeadm/Flannel inventory commands
-remain documented in the [separate runbook](docs/runbook.md).
+The original static kubeadm/Flannel inventory commands remain documented in the
+[separate runbook](docs/runbook.md).
 
 ## Tested behavior
 
 Fresh enrollment, drain/disconnect, and re-enrollment passed on all four CNI
 profiles. Checks covered TCP 64 KiB and UDP 1000/1422/8192 bytes in both directions
 against every original worker, Service DNS/HTTP, logs, and exec. The first Calico
-lab also tested a worker without ExternalIP, addon reconciliation, and worker-service
-restart recovery. See [the full report and build qualifications](docs/cni-matrix-2026-10-30.md).
+lab also tested a worker without ExternalIP, reconciliation by the former addon,
+and worker-service restart recovery. See [the full report and build qualifications](docs/cni-matrix-2026-10-30.md).
 
-These are historical tests before the rename. Host reboot, sustained load,
+The in-cluster controller was tested on a local single-node k0s 1.36 with a
+containerized stand-in server: discovery, SSH, gateways from the image, status,
+spec immutability, and both disconnect paths. A full enrollment through the
+controller on a real server is still pending. These are historical tests before
+the rename. Host reboot, sustained load,
 NetworkPolicy, CSI, and cloud LoadBalancer behavior remain uncertified.
 
 ## Permissions and credentials
 
-Gateways use hostNetwork and NET_ADMIN. The addon stores SSH credentials in
-Secret `vds-ssh` and uses explicit RBAC, including bootstrap and checked serving-CSR
-approval. Administrator credentials are not copied to the server. Secret encryption
-at rest depends on the cluster. Read [permissions and limits](docs/addon.md).
+The controller's RBAC is static in `install.yaml`; read it before installing.
+Writes outside its namespace are limited by name where Kubernetes allows it: the
+node `k0nnect-vds`, one bootstrap-token Secret, the worker profile, and the gateway
+role. It also lists Pods cluster-wide and creates evictions to drain the node.
+Gateways use hostNetwork and NET_ADMIN, and the controller holds root SSH to the
+server, so treat it as node-root-equivalent, like a CNI operator. The SSH credential
+stays in Secret `vds-ssh`; administrator credentials are never copied to the
+server. Read [permissions and limits](docs/addon.md).
+
+## Upgrading from `addon-install`
+
+The `addon-install` and `operator` commands were replaced by the controller. Run
+`k0nnect disconnect --drain` with your old configuration, then install the controller.
 
 ## Upgrading from the previous name
 
@@ -152,6 +181,8 @@ installations are not automatically migrated by a code or repository rename.
 
 ```sh
 make check                         # go vet + race tests
+make image                         # local image k0nnect:dev
+make manifest IMAGE=k0nnect:dev    # install manifest for that image
 make site                          # static output in site/
 python3 -m http.server 8080 --directory site
 ```

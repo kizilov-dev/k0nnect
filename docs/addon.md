@@ -20,12 +20,13 @@ detected from its DaemonSet:
 
 The installer rejects other configurations and never patches the CNI. Linux VDS with
 root SSH, apt, systemd, Python 3, kernel WireGuard and Internet package/release
-access is required. Cluster workers also need package/image access. The initial
-implementation supports one connection per cluster and one managed worker per VDS.
+access is required. Cluster workers pull the k0nnect image from `ghcr.io`. The connector
+supports one connection per cluster and one managed worker per VDS; k0s minors
+1.30 to 1.40 are accepted.
 
-The caller needs permissions to install the listed resources; a kubeconfig with
-only workload access cannot install this addon. No control-plane SSH is needed
-when the API permits bootstrap token creation and normal kubelet bootstrap.
+Installing the controller needs cluster-admin once, to create its CRD and RBAC.
+No control-plane SSH is needed when the API permits bootstrap token creation and
+normal kubelet bootstrap.
 
 ## Network design
 
@@ -61,54 +62,88 @@ gateway listens on the port without a Service. The exact
 ports and worker subnet are configurable. Keys are generated on their hosts and
 stored root-only. An SSH Ed25519 fingerprint is pinned before authentication.
 
+## Controller
+
+`install.yaml` from a release creates namespace `k0nnect-system`, the cluster-scoped
+CRD `vdsconnections.k0nnect.io`, ServiceAccount `controller`, its RBAC and a
+Deployment. One image, pinned by digest and signed with cosign in the release
+workflow, runs the controller, the gateway agents and the gateway cleanup Jobs;
+the controller copies its own binary to the VDS over SSH.
+
+```sh
+kubectl apply -f https://github.com/kizilov-dev/k0nnect/releases/latest/download/install.yaml
+kubectl -n k0nnect-system create secret generic vds-ssh --from-file=private-key=./id_ed25519
+kubectl apply -f examples/vdsconnection.yaml   # edited: host, fingerprint, /24
+kubectl get vdsconnection
+kubectl -n k0nnect-system logs deploy/controller
+```
+
+The controller manages one `VDSConnection`, which a CEL rule requires to be
+named `vds`; the node is `k0nnect-vds`. These fixed names let the static RBAC be
+scoped by name. The controller connects on every spec change and reconciles every
+minute; `status.phase` is `Connecting`, `Ready`, `Disconnecting` or `Error`, with
+the error in `status.message`. The spec is immutable, so disconnect always reaches
+the server the worker was provisioned on. The finalizer `k0nnect.io/disconnect`
+is added only after the spec and Secret validate.
+
+Verify the image before installing:
+
+```sh
+cosign verify ghcr.io/kizilov-dev/k0nnect@sha256:DIGEST \
+  --certificate-identity-regexp '^https://github.com/kizilov-dev/k0nnect/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Credentials and permissions
 
-The addon copies the provided SSH password/key into Secret `vds-ssh`, mounted
-0400 in its installer Pod. Kubernetes Secret confidentiality depends on the
-cluster's encryption-at-rest and access policy. The administrator kubeconfig is
-never copied to the VDS or addon. Enrollment uses a standard k0s bootstrap token
-with a one-hour expiry; the connector revokes it after joining or a failed attempt.
+The controller reads Secret `vds-ssh` (key `private-key` or `password`) through
+the API by name; it is not mounted. Kubernetes Secret confidentiality depends on
+the cluster's encryption-at-rest and access policy. The administrator kubeconfig
+is never copied to the VDS or the controller. Enrollment uses a standard k0s
+bootstrap token with a one-hour expiry; the connector revokes it after joining or
+a failed attempt. The controller Pod runs as non-root with a read-only root
+filesystem and no capabilities.
 
-The installer has explicit RBAC, not the cluster-admin role. It can patch only
-the external Node, approve kubelet-serving CSRs and manage its gateway resources;
-outside its namespace get/patch is limited to its own worker profile, Role and
-gateway ClusterRole plus read access to the default worker profile and CNI
-configuration. CSR identity,
-signature and SANs are checked before approval. Bootstrap Secret read/delete is
-limited to the connection's deterministic token name. Kubernetes cannot restrict
-Secret **create** by resourceNames, so that permission in kube-system remains
-broader. Installation itself requires an administrator able to grant these roles.
-This is privileged infrastructure software and is not a namespace security boundary.
+The controller has static RBAC, not the cluster-admin role:
 
-## CLI and addon
+| Scope | Access |
+| --- | --- |
+| Named objects | patch/delete Node `k0nnect-vds`; get/delete the bootstrap-token Secret; worker-profile ConfigMaps (one name per supported minor) and Role; gateway ClusterRole; `VDSConnection` `vds` and its status; Secret `vds-ssh` |
+| Discovery | get/list Nodes, Namespaces, Services, Calico IPPools, CSRs; get named CNI DaemonSets and ConfigMaps and the default worker profiles |
+| Drain | list Pods cluster-wide, create evictions |
+| Create | RBAC objects, ConfigMaps and Secrets: Kubernetes cannot restrict create by name |
+| CSRs | approve `kubernetes.io/kubelet-serving` after checking identity, signature and SANs |
+| Own namespace | Pods, Jobs, DaemonSets, Services, ConfigMaps, ServiceAccounts, Roles |
 
-Build a static binary with Go >= 1.26 (`make build`). `make plugin` additionally
-creates `bin/kubectl-k0nnect`; add this directory to PATH to use `kubectl k0nnect`.
-Copy `examples/connection.json`, supply a root-only password/key file and replace
-the documentation endpoint and fingerprint with independently verified values.
+Gateways run with hostNetwork and NET_ADMIN in a namespace with the privileged
+Pod Security level, and the controller holds root SSH to the VDS. Treat it as
+node-root-equivalent, like a CNI operator: the RBAC scoping limits mistakes, it
+is not a security boundary against a compromised controller.
+
+## CLI
+
+The CLI connects a server once from a workstation and leaves no controller. Use
+`k0nnect-linux-amd64` from a release or `make build` (Go >= 1.26); `make plugin`
+adds `bin/kubectl-k0nnect`. Copy `examples/connection.json`, supply a root-only
+password/key file and replace the documentation endpoint and fingerprint with
+independently verified values. Set `"image"` to run gateways from a release image;
+otherwise the CLI ships its own binary in compressed ConfigMap chunks into Ubuntu
+containers that install the network tools at start.
 
 ```sh
 bin/k0nnect connect-check --kubeconfig /secure/cluster.yaml --config /secure/connection.json
 bin/k0nnect connect-plan --kubeconfig /secure/cluster.yaml --config /secure/connection.json --output /tmp/connect-review.json
-# Install and run continuously in the cluster:
-bin/k0nnect addon-install --kubeconfig /secure/cluster.yaml --config /secure/connection.json
-# Or connect once from the workstation:
 bin/k0nnect connect --kubeconfig /secure/cluster.yaml --config /secure/connection.json
+bin/k0nnect verify-node --kubeconfig /secure/cluster.yaml --config /secure/connection.json
 ```
 
 `connect-check` authenticates SSH and reads compatibility/state without mutation.
 `connect-plan` sends only GET to the real API and intercepts all proposed writes
 locally; it never uses SSH. Its redacted JSON is a review artifact, not an apply
-manifest. The addon uses a Deployment, ConfigMaps and Secret rather than a CRD.
-The initial packaging ships the executable in compressed ConfigMap chunks and
-installs runtime tools in Ubuntu containers; a dedicated image is future work.
-
-```sh
-kubectl -n k0nnect-system get configmap connection-status -o yaml
-kubectl -n k0nnect-system logs deployment/installer
-kubectl get node k0nnect-vds -o wide
-bin/k0nnect verify-node --kubeconfig /secure/cluster.yaml --config /secure/connection.json
-```
+manifest. The CLI keeps its objects in a namespace it owns; the controller refuses
+such objects, so disconnect a CLI connection before installing the controller.
+The former `addon-install` command is replaced by the controller; disconnect its
+installations with `k0nnect disconnect --drain` first.
 
 The worker initially has an initialization NoSchedule taint. Verification schedules
 tolerating test workloads and checks TCP 64 KiB and UDP 1000/1422/8192-byte exchanges
@@ -120,14 +155,26 @@ cloud-provider behavior and sustained load are not yet certified.
 ## Removal
 
 ```sh
+kubectl delete vdsconnection vds
+# CLI connections:
 bin/k0nnect disconnect --drain --kubeconfig /secure/cluster.yaml --config /secure/connection.json
 ```
 
-Removal scales down the installer, cordons and drains the worker respecting PDBs,
-stops managed services/runtime tasks and remaining k0s containerd shims, removes
-the node's CNI state on the VDS and removes owned network resources and node.
-Cleanup validates ownership and does not reset unrelated hosts. Installed packages,
-k0s data and recovery keys remain on the VDS.
+Removal cordons and drains the worker respecting PDBs, stops managed
+services/runtime tasks and remaining k0s containerd shims, removes the node's CNI
+state on the VDS and removes owned network resources and node. Cleanup validates
+ownership and does not reset unrelated hosts. Installed packages, k0s data and
+recovery keys remain on the VDS. When the VDS is unreachable but neither the node
+nor the gateway network was ever created, only cluster objects are removed. If the
+VDS is gone for good after it joined, remove the finalizer by hand and delete the
+node and leftovers:
+
+```sh
+kubectl patch vdsconnection vds --type merge -p '{"metadata":{"finalizers":null}}'
+```
+
+Uninstall the controller after the `VDSConnection` is gone:
+`kubectl delete -f install.yaml`.
 
 Live results: [2026-10-30 worker report](worker-enrollment-2026-10-30.md),
 [2026-10-30 CNI matrix](cni-matrix-2026-10-30.md).

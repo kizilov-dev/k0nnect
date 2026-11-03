@@ -35,12 +35,12 @@ func main() {
 func run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) > 0 {
 		switch args[0] {
-		case "connect", "connect-plan", "connect-check", "verify-node", "disconnect", "gateway-agent", "gateway-remove", "worker-network", "worker-agent", "worker-remove", "operator", "addon-install":
+		case "connect", "connect-plan", "connect-check", "verify-node", "disconnect", "gateway-agent", "gateway-remove", "worker-network", "worker-agent", "worker-remove", "controller", "manifest":
 			return enrollmentCommand(ctx, args, out)
 		}
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: k0nnect <connect-check|connect-plan|connect|addon-install|verify-node|disconnect> --config connection.json --kubeconfig PATH; static profile: <plan|doctor|apply|agent|status|verify|remove|join-config> --config inventory.json --node NAME")
+		return fmt.Errorf("usage: k0nnect <connect-check|connect-plan|connect|verify-node|disconnect> --config connection.json --kubeconfig PATH; k0nnect manifest --image REF; in-cluster: k0nnect controller --image REF; static profile: <plan|doctor|apply|agent|status|verify|remove|join-config> --config inventory.json --node NAME")
 	}
 	f := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	config := f.String("config", "", "inventory JSON file")
@@ -247,8 +247,23 @@ func enrollmentCommand(ctx context.Context, args []string, out io.Writer) error 
 	kubeconfig := f.String("kubeconfig", "", "kubeconfig path; omitted uses in-cluster service account")
 	output := f.String("output", "", "redacted review plan output file")
 	drain := f.Bool("drain", false, "cordon and evict workloads before disconnect; honor disruption budgets")
+	image := f.String("image", "", "k0nnect image reference for the controller and gateway agents")
 	if e := f.Parse(args[1:]); e != nil {
 		return e
+	}
+	switch args[0] {
+	case "manifest":
+		objects, e := enroll.ControllerManifest(*image)
+		if e != nil {
+			return e
+		}
+		return enroll.WriteYAML(out, objects)
+	case "controller":
+		k, e := kube.New(ctx, "")
+		if e != nil {
+			return e
+		}
+		return enroll.Controller(ctx, k, *image, out)
 	}
 	if args[0] == "gateway-agent" {
 		return enroll.Agent(ctx, "gateway-agent", "")
@@ -285,10 +300,6 @@ func enrollmentCommand(ctx context.Context, args []string, out io.Writer) error 
 		return enroll.VerifyNode(ctx, k, c, out)
 	case "disconnect":
 		return enroll.Disconnect(ctx, k, c, *drain, out)
-	case "addon-install":
-		return enroll.InstallAddon(ctx, k, c, out)
-	case "operator":
-		return enroll.Operator(ctx, k, *config, out)
 	}
 	return fmt.Errorf("unknown enrollment command")
 }

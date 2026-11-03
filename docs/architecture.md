@@ -3,7 +3,8 @@
 Status: experimental. The original static kubeadm/Flannel profile is described
 below. The newer API-driven k0s connector (Calico, Flannel, Cilium or kube-router)
 uses a dedicated worker network namespace and gateway agents; its different routes,
-firewall ownership and bootstrap are described in [addon architecture](addon.md).
+firewall ownership, bootstrap and the in-cluster controller are described in
+[connector architecture](addon.md).
 Live enrollment and workload checks passed for those concrete profiles:
 [Calico report](worker-enrollment-2026-10-30.md), [CNI matrix](cni-matrix-2026-10-30.md).
 Production compatibility and operational safety are not certified.

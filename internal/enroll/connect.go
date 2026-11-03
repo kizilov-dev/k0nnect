@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,6 +105,9 @@ func discover(ctx context.Context, k *kube.Client, c *Config) ([]Peer, kube.Obje
 		a := base
 		a[3] = byte(i + 1)
 		peers[i].Address = netip.AddrFrom4(a).String()
+	}
+	if !slices.Contains(supportedMinors, minor) {
+		return nil, nil, "", fmt.Errorf("k0s minor %s is outside the supported range %s..%s", minor, supportedMinors[0], supportedMinors[len(supportedMinors)-1])
 	}
 	cni, e := detectCNI(ctx, k, network)
 	if e != nil {

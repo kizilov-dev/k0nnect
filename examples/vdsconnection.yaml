@@ -1,0 +1,14 @@
+# Apply after install.yaml and Secret k0nnect-system/vds-ssh.
+# The controller manages one VDSConnection, which must be named "vds".
+# The spec is immutable: delete and recreate the object to change it.
+apiVersion: k0nnect.io/v1alpha1
+kind: VDSConnection
+metadata:
+  name: vds
+spec:
+  host: 203.0.113.10
+  # ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub, read on the server itself
+  hostKeySHA256: SHA256:REPLACE+WITH+VERIFIED+ED25519+FINGERPRINT+000
+  transportCIDR: 10.203.74.0/24
+  workerAddress: 10.203.74.100
+  # Optional: sshPort (22), port (31820), mtu (1400), k0sVersion (cluster's)

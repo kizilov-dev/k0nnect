@@ -52,7 +52,11 @@ func TestPreviewNeverForwardsMutationsAndRedactsCredentials(t *testing.T) {
 	})
 	preview := &previewTransport{read: read, objects: map[string]kube.Object{}}
 	k := &kube.Client{Server: "https://example.test", HTTP: &http.Client{Transport: preview}}
-	if e := InstallAddon(context.Background(), k, c, io.Discard); e != nil {
+	if e := gatewayResources(context.Background(), k, c, map[string]Network{}, []string{"worker-a"}); e != nil {
+		t.Fatal(e)
+	}
+	secret := kube.Object{"apiVersion": "v1", "kind": "Secret", "metadata": kube.Object{"name": "credentials", "namespace": c.Namespace}, "stringData": kube.Object{"password": password}}
+	if e := k.Apply(context.Background(), "/api/v1/namespaces/"+c.Namespace+"/secrets", "credentials", secret); e != nil {
 		t.Fatal(e)
 	}
 	if reads == 0 || len(preview.requests) == 0 {
@@ -67,32 +71,6 @@ func TestPreviewNeverForwardsMutationsAndRedactsCredentials(t *testing.T) {
 	}
 	if !bytes.Contains(b, []byte("redacted")) {
 		t.Fatal("secret was not redacted")
-	}
-	foundDeployment, foundTokenScope := false, false
-	for _, r := range preview.requests {
-		if kube.Str(r.Object, "kind") == "Deployment" {
-			foundDeployment = true
-			spec := kube.Map(kube.Map(kube.Map(r.Object, "spec"), "template"), "spec")
-			if spec["hostNetwork"] == true {
-				t.Fatal("installer itself has host network")
-			}
-		}
-		if kube.Str(r.Object, "kind") == "Role" && kube.Str(kube.Map(r.Object, "metadata"), "namespace") == "kube-system" {
-			for _, v := range kube.Items(r.Object, "rules") {
-				rule := kube.As(v)
-				raw, _ := json.Marshal(rule)
-				if bytes.Contains(raw, []byte(`"delete"`)) && bytes.Contains(raw, []byte(`"secrets"`)) {
-					names := kube.Items(rule, "resourceNames")
-					if len(names) != 1 || names[0] != tokenName(c) {
-						t.Fatal("bootstrap cleanup permissions not scoped")
-					}
-					foundTokenScope = true
-				}
-			}
-		}
-	}
-	if !foundDeployment || !foundTokenScope {
-		t.Fatal("addon or token permissions missing")
 	}
 }
 func TestOwnedApplyRefusesForeignResources(t *testing.T) {
@@ -269,26 +247,16 @@ func TestWorkerProfileGrantIsBoundedToNewIdentityAndConfigMap(t *testing.T) {
 }
 
 func TestRenameRefusesLegacyInstallationBeforeMutations(t *testing.T) {
-	for _, operation := range []string{"connect", "addon"} {
-		t.Run(operation, func(t *testing.T) {
-			k := &kube.Client{Server: "https://example.test", HTTP: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
-				if r.Method != "GET" {
-					t.Fatalf("rename made a mutation: %s", r.Method)
-				}
-				if r.URL.Path != "/api/v1/namespaces" || r.URL.Query().Get("labelSelector") != "app.kubernetes.io/managed-by=k8nnect" {
-					t.Fatalf("unexpected preflight: %s", r.URL)
-				}
-				return response(200, kube.Object{"items": []any{kube.Object{"metadata": kube.Object{"name": "legacy-system"}}}}), nil
-			})}}
-			var err error
-			if operation == "connect" {
-				err = Connect(context.Background(), k, fixtureConfig(), io.Discard)
-			} else {
-				err = InstallAddon(context.Background(), k, fixtureConfig(), io.Discard)
-			}
-			if err == nil || !strings.Contains(err.Error(), "legacy installation") {
-				t.Fatalf("missing migration refusal: %v", err)
-			}
-		})
+	k := &kube.Client{Server: "https://example.test", HTTP: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" {
+			t.Fatalf("rename made a mutation: %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/namespaces" || r.URL.Query().Get("labelSelector") != "app.kubernetes.io/managed-by=k8nnect" {
+			t.Fatalf("unexpected preflight: %s", r.URL)
+		}
+		return response(200, kube.Object{"items": []any{kube.Object{"metadata": kube.Object{"name": "legacy-system"}}}}), nil
+	})}}
+	if err := Connect(context.Background(), k, fixtureConfig(), io.Discard); err == nil || !strings.Contains(err.Error(), "legacy installation") {
+		t.Fatalf("missing migration refusal: %v", err)
 	}
 }

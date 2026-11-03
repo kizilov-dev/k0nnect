@@ -63,7 +63,11 @@ func issueToken(ctx context.Context, k *kube.Client, c Config) (string, string, 
 	return name, encoded, e
 }
 
-// Names of the cluster objects an installer manages; its RBAC is scoped to them.
+// supportedMinors bounds the k0s releases a connection accepts. Worker profile
+// ConfigMaps are named per minor, and the controller's RBAC lists those names.
+var supportedMinors = []string{"1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40"}
+
+// Names of the cluster objects a connection manages; controller RBAC is scoped to them.
 func profileConfigMap(c Config, minor string) string {
 	return "worker-config-k0nnect-" + c.Name + "-" + minor
 }

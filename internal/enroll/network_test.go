@@ -46,3 +46,15 @@ func TestGatewayRulesBlockLinkLocal(t *testing.T) {
 		t.Fatal("legacy rule must be the unrestricted accept it replaces")
 	}
 }
+
+func TestImageReference(t *testing.T) {
+	for ref, ok := range map[string]bool{
+		"k0nnect:dev": true, "docker.io/library/k0nnect:dev": true, "registry.example.com:5000/k0nnect:v1": true,
+		"ghcr.io/kizilov-dev/k0nnect:v0.1.0@sha256:" + strings.Repeat("a", 64): true, "localhost:5000/k0nnect": true,
+		"k0nnect:dev;rm -rf /": false, "Registry/k0nnect": false, "k0nnect@sha256:short": false, "": false,
+	} {
+		if imageReference.MatchString(ref) != ok {
+			t.Errorf("image reference %q accepted=%v", ref, !ok)
+		}
+	}
+}
